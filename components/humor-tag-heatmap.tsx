@@ -14,6 +14,16 @@ export type HeatmapCell = {
   hits: number;
 };
 
+/** One captioned meme that falls in a heatmap cell. */
+export type HeatmapMeme = {
+  id: string;
+  caption_text: string;
+  image_url: string | null;
+  image_description: string | null;
+  sample: number;
+  hits: number;
+};
+
 type HumorTagHeatmapProps = {
   humorStyles: HeatmapTag[];
   subjects: HeatmapTag[];
@@ -26,6 +36,8 @@ type HumorTagHeatmapProps = {
   hitLabel: string;
   studyRate: number;
   minSample: number;
+  /** Memes per cell, keyed `${humorStyleTagId}|${subjectTagId}`; enables click-to-show. */
+  memesByCell?: Record<string, HeatmapMeme[]>;
 };
 
 /** Sequential blue ramp, steps 100→700 (light → dark). */
@@ -80,8 +92,11 @@ export function HumorTagHeatmap({
   hitLabel,
   studyRate,
   minSample,
+  memesByCell,
 }: HumorTagHeatmapProps) {
   const [activeKey, setActiveKey] = useState<string | null>(null);
+  const [selectedKey, setSelectedKey] = useState<string | null>(null);
+  const toggleSelected = (key: string) => setSelectedKey((current) => (current === key ? null : key));
 
   const cellByKey = new Map(cells.map((cell) => [`${cell.humor_style_tag_id}|${cell.subject_tag_id}`, cell]));
   const rate = (cell: HeatmapCell) => (cell.sample === 0 ? 0 : cell.hits / cell.sample);
@@ -138,8 +153,9 @@ export function HumorTagHeatmap({
                 {subjects.map((subject) => {
                   const key = `${style.id}|${subject.id}`;
                   const cell = cellByKey.get(key);
-                  const isActive = activeKey === key;
+                  const isActive = activeKey === key || selectedKey === key;
                   const ring = isActive ? "outline outline-2 outline-offset-1 outline-[var(--foreground)]" : "";
+                  const clickable = Boolean(memesByCell);
                   if (!cell) {
                     return (
                       <td
@@ -163,8 +179,21 @@ export function HumorTagHeatmap({
                       onMouseLeave={() => setActiveKey(null)}
                       onFocus={() => setActiveKey(key)}
                       onBlur={() => setActiveKey(null)}
+                      role={clickable ? "button" : undefined}
+                      aria-pressed={clickable ? selectedKey === key : undefined}
+                      onClick={clickable ? () => toggleSelected(key) : undefined}
+                      onKeyDown={
+                        clickable
+                          ? (event) => {
+                              if (event.key === "Enter" || event.key === " ") {
+                                event.preventDefault();
+                                toggleSelected(key);
+                              }
+                            }
+                          : undefined
+                      }
                       style={isReliable ? heatStyle(scale(rate(cell))) : undefined}
-                      className={`h-11 cursor-default rounded text-center tabular-nums ${ring} ${
+                      className={`h-11 ${clickable ? "cursor-pointer" : "cursor-default"} rounded text-center tabular-nums ${ring} ${
                         isReliable
                           ? "app-heat-cell font-semibold"
                           : "app-muted border border-dashed border-[var(--muted)] text-xs"
@@ -190,7 +219,9 @@ export function HumorTagHeatmap({
             : {describe(activeCell)}
           </>
         ) : (
-          <span className="app-muted">Hover or tab to a cell for details.</span>
+          <span className="app-muted">
+            Hover or tab to a cell for details{memesByCell ? "; click it to see its memes" : ""}.
+          </span>
         )}
       </p>
 
@@ -217,6 +248,88 @@ export function HumorTagHeatmap({
         <span>· = no captions with this pair</span>
         <span>Study average {formatPercent(studyRate)}</span>
       </div>
+
+      {selectedKey && memesByCell ? (
+        <SelectedCellMemes
+          title={`${nameById.get(Number(selectedKey.split("|")[0])) ?? ""} × ${nameById.get(Number(selectedKey.split("|")[1])) ?? ""}`}
+          memes={memesByCell[selectedKey] ?? []}
+          sampleLabel={sampleLabel}
+          hitLabel={hitLabel}
+          metricLabel={metricLabel}
+          onClose={() => setSelectedKey(null)}
+        />
+      ) : null}
     </div>
+  );
+}
+
+function SelectedCellMemes({
+  title,
+  memes,
+  sampleLabel,
+  hitLabel,
+  metricLabel,
+  onClose,
+}: {
+  title: string;
+  memes: HeatmapMeme[];
+  sampleLabel: string;
+  hitLabel: string;
+  metricLabel: string;
+  onClose: () => void;
+}) {
+  const sorted = [...memes].sort(
+    (a, b) => (b.sample ? b.hits / b.sample : -1) - (a.sample ? a.hits / a.sample : -1) || b.sample - a.sample,
+  );
+  return (
+    <section className="app-card space-y-3 rounded-xl p-4" aria-label={`Memes for ${title}`}>
+      <div className="flex flex-wrap items-start justify-between gap-2">
+        <div>
+          <h3 className="text-base font-semibold">{title}</h3>
+          <p className="app-muted text-xs">
+            {memes.length} caption(s), highest {metricLabel.toLowerCase()} first
+          </p>
+        </div>
+        <button type="button" onClick={onClose} className="app-button rounded-md px-3 py-1 text-sm">
+          Close
+        </button>
+      </div>
+      <div className="grid grid-cols-1 items-start gap-4 md:grid-cols-2 xl:grid-cols-3">
+        {sorted.map((meme) => (
+          <article key={meme.id} className="app-card overflow-hidden rounded-xl">
+            {meme.image_url ? (
+              <div className="flex min-h-48 items-center justify-center bg-white/40 p-3 dark:bg-slate-950/20">
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img
+                  src={meme.image_url}
+                  alt={meme.image_description ?? meme.caption_text}
+                  loading="lazy"
+                  decoding="async"
+                  className="max-h-[24rem] max-w-full object-contain"
+                />
+              </div>
+            ) : (
+              <div className="grid min-h-48 place-items-center bg-white/30 p-6 text-sm dark:bg-slate-950/20">
+                <span className="app-muted">Image unavailable</span>
+              </div>
+            )}
+            <div className="p-4">
+              <p className="text-base font-semibold leading-6">{meme.caption_text}</p>
+              <p className="app-muted mt-3 text-sm tabular-nums">
+                {meme.sample === 0 ? (
+                  `No ${sampleLabel} yet`
+                ) : (
+                  <>
+                    <span className="font-semibold text-foreground">{formatPercent(meme.hits / meme.sample)}</span>{" "}
+                    {metricLabel.toLowerCase()} · {meme.hits.toLocaleString()} {hitLabel} of{" "}
+                    {meme.sample.toLocaleString()} {sampleLabel}
+                  </>
+                )}
+              </p>
+            </div>
+          </article>
+        ))}
+      </div>
+    </section>
   );
 }

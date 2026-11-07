@@ -2,7 +2,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import type { SupabaseClient } from "@supabase/supabase-js";
 
-import { HumorTagHeatmap, type HeatmapCell, type HeatmapTag } from "@/components/humor-tag-heatmap";
+import { HumorTagHeatmap, type HeatmapCell, type HeatmapMeme, type HeatmapTag } from "@/components/humor-tag-heatmap";
 import { LocalStudyWindow } from "@/components/local-study-window";
 import { ReportLoadForm } from "@/components/report-load-form";
 import { StudyHeaderActions } from "@/components/study-header-actions";
@@ -796,7 +796,12 @@ const buildNewStyleReport = ({
   };
 };
 
-type TagHeatmapData = { humorStyles: HeatmapTag[]; subjects: HeatmapTag[]; cells: HeatmapCell[] };
+type TagHeatmapData = {
+  humorStyles: HeatmapTag[];
+  subjects: HeatmapTag[];
+  cells: HeatmapCell[];
+  memesByCell: Record<string, HeatmapMeme[]>;
+};
 
 /**
  * Groups caption rows by (primary humor style, image's primary subject). Sample is
@@ -811,6 +816,7 @@ const buildTagHeatmap = (
   const cells = new Map<string, HeatmapCell>();
   const totals = { style: new Map<number, number>(), subject: new Map<number, number>() };
   const tagById = new Map<number, HeatmapTag>();
+  const memesByCell: Record<string, HeatmapMeme[]> = {};
 
   for (const row of rows) {
     const style = tags.styleTagByCaption.get(row.caption_id);
@@ -831,6 +837,14 @@ const buildTagHeatmap = (
     cell.sample += row.viewers;
     cell.hits += row.likers;
     cells.set(key, cell);
+    (memesByCell[key] ??= []).push({
+      id: row.mapping_id.toString(),
+      caption_text: row.caption_text,
+      image_url: row.image_url,
+      image_description: row.image_description,
+      sample: row.viewers,
+      hits: row.likers,
+    });
     totals.style.set(style.id, (totals.style.get(style.id) ?? 0) + row.viewers);
     totals.subject.set(subject.id, (totals.subject.get(subject.id) ?? 0) + row.viewers);
   }
@@ -841,7 +855,7 @@ const buildTagHeatmap = (
       .sort((a, b) => b[1] - a[1] || (tagById.get(a[0])?.name ?? "").localeCompare(tagById.get(b[0])?.name ?? ""))
       .map(([id]) => tagById.get(id) as HeatmapTag);
 
-  return { humorStyles: ordered(totals.style), subjects: ordered(totals.subject), cells: [...cells.values()] };
+  return { humorStyles: ordered(totals.style), subjects: ordered(totals.subject), cells: [...cells.values()], memesByCell };
 };
 
 const formatPercent = (value: number | null) => {
@@ -1040,6 +1054,7 @@ export default async function NewStyleReportPage({
               hitLabel="liked"
               studyRate={report.like_rate ?? 0}
               minSample={HEATMAP_MIN_VIEWERS}
+              memesByCell={tagHeatmap.memesByCell}
             />
           ) : (
             <p className="app-muted text-sm">
