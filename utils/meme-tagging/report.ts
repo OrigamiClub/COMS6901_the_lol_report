@@ -32,6 +32,17 @@ export type TagVoteSummary = {
   like_rate: number;
 };
 
+/** Outcomes for captions whose primary humor style and image subject are this pair. */
+export type TagMatrixCell = {
+  humor_style_tag_id: number;
+  subject_tag_id: number;
+  captions: number;
+  votes: number;
+  upvotes: number;
+  views: number;
+  liked_views: number;
+};
+
 export type StudyTagReport = {
   run: Pick<MemeTaggingRunRow, "id" | "status" | "model_name" | "prompt_version" | "created_datetime_utc" | "study_id"> | null;
   study_captions: number;
@@ -45,6 +56,8 @@ export type StudyTagReport = {
   study_like_rate: number;
   humor_style: TagVoteSummary[];
   subject: TagVoteSummary[];
+  /** Humor style × subject combinations that have at least one tagged caption. */
+  matrix: TagMatrixCell[];
 };
 
 const chunk = <T,>(items: T[], size: number): T[][] => {
@@ -175,7 +188,7 @@ export const buildStudyTagReport = async (supabase: Client, studyId: number): Pr
   };
 
   if (!run) {
-    return { run: null, tagged_captions: 0, humor_style: [], subject: [], ...base };
+    return { run: null, tagged_captions: 0, humor_style: [], subject: [], matrix: [], ...base };
   }
 
   const captions = await fetchByIds(captionIds, "captions", (ids, from, to) =>
@@ -255,8 +268,38 @@ export const buildStudyTagReport = async (supabase: Client, studyId: number): Pr
     ].filter((summary): summary is NonNullable<typeof summary> => summary !== null);
   };
 
+  const matrix = new Map<string, TagMatrixCell & { captionSet: Set<string> }>();
+  /** Cell for the caption's (humor style, subject) pair, or null if either tag is missing. */
+  const matrixCellForCaption = (captionId: string) => {
+    const styleTagId = styleTagByCaption.get(captionId);
+    const imageId = imageByCaptionId.get(captionId);
+    const subjectTagId = imageId ? subjectTagByImage.get(imageId) : undefined;
+    if (styleTagId === undefined || subjectTagId === undefined) return null;
+    if (!tagById.has(styleTagId) || !tagById.has(subjectTagId)) return null;
+    const key = `${styleTagId}|${subjectTagId}`;
+    let matrixCell = matrix.get(key);
+    if (!matrixCell) {
+      matrixCell = {
+        humor_style_tag_id: styleTagId,
+        subject_tag_id: subjectTagId,
+        captions: 0,
+        votes: 0,
+        upvotes: 0,
+        views: 0,
+        liked_views: 0,
+        captionSet: new Set(),
+      };
+      matrix.set(key, matrixCell);
+    }
+    matrixCell.captionSet.add(captionId);
+    return matrixCell;
+  };
+
   // Register every tagged caption (so captions with no votes or views still count).
-  for (const captionId of captionIds) summariesForCaption(captionId);
+  for (const captionId of captionIds) {
+    summariesForCaption(captionId);
+    matrixCellForCaption(captionId);
+  }
 
   for (const vote of votes) {
     const captionId = vote.study_caption_mapping_id === null ? undefined : captionByMappingId.get(vote.study_caption_mapping_id);
@@ -267,6 +310,11 @@ export const buildStudyTagReport = async (supabase: Client, studyId: number): Pr
       summary.distribution[voteValue] += 1;
       if (isPositiveStudyVote(voteValue)) summary.upvotes += 1;
     }
+    const matrixCell = matrixCellForCaption(captionId);
+    if (matrixCell) {
+      matrixCell.votes += 1;
+      if (isPositiveStudyVote(voteValue)) matrixCell.upvotes += 1;
+    }
   }
 
   for (const view of views) {
@@ -276,6 +324,11 @@ export const buildStudyTagReport = async (supabase: Client, studyId: number): Pr
     for (const summary of summariesForCaption(captionId)) {
       summary.views += 1;
       if (liked) summary.liked_views += 1;
+    }
+    const matrixCell = matrixCellForCaption(captionId);
+    if (matrixCell) {
+      matrixCell.views += 1;
+      if (liked) matrixCell.liked_views += 1;
     }
   }
 
@@ -294,6 +347,7 @@ export const buildStudyTagReport = async (supabase: Client, studyId: number): Pr
     tagged_captions: captionIds.filter((captionId) => styleTagByCaption.has(captionId)).length,
     humor_style: finalize("humor_style"),
     subject: finalize("subject"),
+    matrix: [...matrix.values()].map(({ captionSet, ...matrixCell }) => ({ ...matrixCell, captions: captionSet.size })),
     ...base,
   };
 };

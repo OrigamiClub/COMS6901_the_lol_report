@@ -11,7 +11,7 @@ import {
 } from "./caption-gallery-shared";
 
 import { ReportLoadForm } from "@/components/report-load-form";
-import { StudyHeaderActions } from "@/components/study-header-actions";
+import { NEW_STYLE_MIN_STUDY_ID, StudyHeaderActions } from "@/components/study-header-actions";
 import type { Database, Tables } from "@/src/types/supabase";
 import { formatDurationFromMinutes } from "@/utils/format-duration";
 import { createClient } from "@/utils/supabase/server";
@@ -829,7 +829,7 @@ export default async function StudyDetailPage({ params, searchParams }: StudyDet
               </p>
               <h1 className="text-2xl font-semibold">Study Detail</h1>
             </div>
-            <StudyHeaderActions studyId={requestedStudyId} current="study-detail" />
+            <StudyHeaderActions studyId={requestedStudyId} current={requestedStudyId < NEW_STYLE_MIN_STUDY_ID ? "study-overview" : undefined} />
           </div>
           <p className="app-muted text-sm">
             A study-level vote summary with overall volume, vote mix, and caption-by-caption vote

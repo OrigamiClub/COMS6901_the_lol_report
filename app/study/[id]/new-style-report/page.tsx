@@ -864,7 +864,7 @@ export default async function NewStyleReportPage({
               </p>
               <h1 className="text-2xl font-semibold">New Study Interface Report</h1>
             </div>
-            <StudyHeaderActions studyId={requestedStudyId} />
+            <StudyHeaderActions studyId={requestedStudyId} current="study-overview" />
           </div>
 
           <section className="app-card rounded-xl p-5">

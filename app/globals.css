@@ -681,3 +681,19 @@ body {
     opacity: 0.05;
   }
 }
+
+/* Humor tag heatmap: per-cell colors are set inline as CSS vars for each theme. */
+.app-heat-cell {
+  background: var(--heat-light);
+  color: var(--heat-light-ink);
+}
+html.dark .app-heat-cell {
+  background: var(--heat-dark);
+  color: var(--heat-dark-ink);
+}
+.app-heat-legend {
+  background: var(--heat-legend-light);
+}
+html.dark .app-heat-legend {
+  background: var(--heat-legend-dark);
+}
