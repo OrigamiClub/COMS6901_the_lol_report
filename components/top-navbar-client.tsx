@@ -28,6 +28,7 @@ export function TopNavbarClient({ user, siteTitle }: TopNavbarClientProps) {
     { label: "Dashboard Overview", value: "/", category: "Pages" },
     { label: "Study-to-Study Comparison", value: "/reports/study-comparison", category: "Reports" },
     { label: "Weekly Humor Study Summary", value: "/reports/weekly-study-summary", category: "Reports" },
+    { label: "AI Meme Tagging", value: "/tagging", category: "Pages" },
   ];
 
   const filteredSearchPages = SEARCH_PAGES.filter(p =>

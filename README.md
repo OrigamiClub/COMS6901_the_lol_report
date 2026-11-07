@@ -72,9 +72,12 @@ Required Amplify environment variables:
 Optional:
 
 - `NEXT_PUBLIC_API_BASE_URL`
+- `GOOGLE_GENERATIVE_AI_API_KEY` (server-only): enables AI meme tagging on `/tagging`.
+- `MEME_TAGGING_MODEL` (server-only): Gemini model for tagging; defaults to `gemini-3.8-flash`.
 
 Amplify must rebuild after environment values change. The root `amplify.yml`
-writes all `NEXT_PUBLIC_*` Amplify environment variables into `.env.production`
+writes all `NEXT_PUBLIC_*` Amplify environment variables (plus the optional
+server-only `GOOGLE_GENERATIVE_AI_API_KEY` and `MEME_TAGGING_MODEL`) into `.env.production`
 before `next build` so they are available to the Next.js SSR runtime. The build
 fails early if the required site/auth variables are missing from the selected
 Amplify app or branch. The OAuth callback route uses `NEXT_PUBLIC_SITE_URL` for

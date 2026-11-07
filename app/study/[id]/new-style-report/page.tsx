@@ -1,9 +1,9 @@
-import Link from "next/link";
 import { notFound } from "next/navigation";
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { LocalStudyWindow } from "@/components/local-study-window";
 import { ReportLoadForm } from "@/components/report-load-form";
+import { StudyHeaderActions } from "@/components/study-header-actions";
 import {
   StudyNewStyleCaptionBreakdown,
   StudyNewStyleUserTable,
@@ -864,12 +864,7 @@ export default async function NewStyleReportPage({
               </p>
               <h1 className="text-2xl font-semibold">New Study Interface Report</h1>
             </div>
-            <Link
-              href="/"
-              className="app-button inline-flex rounded-lg px-3 py-2 text-sm font-medium transition"
-            >
-              Home
-            </Link>
+            <StudyHeaderActions studyId={requestedStudyId} />
           </div>
 
           <section className="app-card rounded-xl p-5">

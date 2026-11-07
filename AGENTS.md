@@ -27,9 +27,14 @@
 - `app/study/[id]/vote-timing/page.tsx`: Protected report page that shows each user's elapsed first-vote-to-last-vote span for a selected study (`/study/<id>/vote-timing?minVotes=<n>`), with KPI cards and an on-page timing table.
 - `app/study/[id]/user-upvote-rate/page.tsx`: Protected report page that shows per-user upvote percentage for a selected study (`/study/<id>/user-upvote-rate`), sorted by upvote percentage descending with user-level vote counts.
 - `app/study/[id]/selected-user-report/page.tsx`: Protected report page that starts with no selected users and lets you add/remove profiles through a searchable modal to calculate a combined upvote percentage for only the chosen subset (`/study/<id>/selected-user-report?userId=<profile>&userId=<profile>`).
+- `components/study-header-actions.tsx`: Shared header buttons on every `/study/<id>/...` page linking to that study's humor-tags report, the tagging page pre-scoped to the study (`/tagging?studyId=<id>`), and Home.
+- `app/tagging/page.tsx` + `app/tagging/actions.ts`: Protected admin page for AI meme tagging. Drafts subject-matter (image) and humor-style (caption) taxonomies with Gemini, lets superadmins edit/approve tags, and runs batched tagging into `image_meme_tags` / `caption_meme_tags`, either over every study or scoped to one study (`meme_tagging_runs.study_id`; `?studyId=<id>` pre-selects the scope). Logic lives in `utils/meme-tagging/`.
+- `app/study/[id]/humor-tags/page.tsx`: Protected report page comparing outcomes for one study (`/study/<id>/humor-tags`) by each caption's primary AI humor-style tag and its image's primary subject tag. Shows like rate (same-session liked views ÷ `study_caption_navigation_events` views, matching the new-style report) when view data exists, and upvote rate/vote distribution only when the study recorded more than one vote value; using the latest completed tagging run that covers that study (scoped to it or to all studies).
 - `app/api/profile-search/route.ts`: Authenticated route handler used by the selected-user-report modal to search the `profiles` table by name, email, or id.
 - `app/actions/auth.ts`: server actions for sign-in/sign-out.
 - `utils/supabase/`: shared Supabase server/client/proxy helpers.
+- `utils/meme-tagging/`: AI tagging schemas, prompts (`PROMPT_VERSION`), Gemini calls, Supabase queries, batch runner, and humor-tags report aggregation.
+- `supabase/migrations/`: SQL migrations applied to the loldb project (`hcyvpvfiraidvefsnveo`).
 - `proxy.ts`: global route protection (Next.js 16 proxy).
 - `amplify.yml`: AWS Amplify Hosting build spec for SSR deployment.
 - `public/`: static assets.
@@ -66,7 +71,7 @@ npm run lint
 - Add tests as features are introduced (unit + integration where appropriate).
 
 ## Setup and commands
-- Required env vars in `.env.local`: `NEXT_PUBLIC_SUPABASE_URL`, either `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` or `NEXT_PUBLIC_SUPABASE_ANON_KEY`, and `NEXT_PUBLIC_GOOGLE_CLIENT_ID`; `NEXT_PUBLIC_SITE_URL` can be used for callback origin fallback.
+- Required env vars in `.env.local`: `NEXT_PUBLIC_SUPABASE_URL`, either `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` or `NEXT_PUBLIC_SUPABASE_ANON_KEY`, and `NEXT_PUBLIC_GOOGLE_CLIENT_ID`; `NEXT_PUBLIC_SITE_URL` can be used for callback origin fallback. Optional server-only `GOOGLE_GENERATIVE_AI_API_KEY` enables AI meme tagging; `MEME_TAGGING_MODEL` overrides the default `gemini-3.8-flash`.
 - Google OAuth/Supabase redirect allowlists must include the deployed callback URLs (`https://stats.humorstudy.org/auth/callback`, `https://stats.slightlyhumorous.org/auth/callback`) plus the local callback URL for whichever dev port is used.
 - OAuth callback redirects must prefer `NEXT_PUBLIC_SITE_URL` over request-derived origins because Amplify SSR can expose internal localhost origins in route handlers.
 - Install/run: `npm install`, `npm run dev`; lint: `npm run lint`; build: `npm run build`.

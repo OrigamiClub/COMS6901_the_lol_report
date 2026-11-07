@@ -12,7 +12,8 @@ frontend:
             echo "Missing required NEXT_PUBLIC_* Amplify environment variables";
             exit 1;
           fi
-        - printenv | awk -F= '/^NEXT_PUBLIC_/ { print }' >> .env.production
+        # NEXT_PUBLIC_* vars plus optional server-only secrets (never exposed to the browser).
+        - printenv | awk -F= '/^(NEXT_PUBLIC_|GOOGLE_GENERATIVE_AI_API_KEY=|MEME_TAGGING_MODEL=)/ { print }' >> .env.production
         - npm run build
   artifacts:
     baseDirectory: .next

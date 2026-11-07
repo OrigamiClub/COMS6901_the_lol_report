@@ -1,8 +1,8 @@
-import Link from "next/link";
 import { notFound } from "next/navigation";
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { ReportLoadForm } from "@/components/report-load-form";
+import { StudyHeaderActions } from "@/components/study-header-actions";
 import {
   StudyEngagementRiskTable,
   type StudyEngagementRiskTableRow,
@@ -932,12 +932,7 @@ export default async function StudyEngagementRiskPage({
               </p>
               <h1 className="text-2xl font-semibold">Study Engagement Risk</h1>
             </div>
-            <Link
-              href="/"
-              className="app-button inline-flex rounded-lg px-3 py-2 text-sm font-medium transition"
-            >
-              Home
-            </Link>
+            <StudyHeaderActions studyId={requestedStudyId} />
           </div>
           <p className="app-muted text-sm">
             Composite risk score = 40% speed/read-load, 30% low leave-one-out consensus agreement,

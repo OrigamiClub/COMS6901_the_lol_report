@@ -1,4 +1,3 @@
-import Link from "next/link";
 import { notFound } from "next/navigation";
 import type { SupabaseClient } from "@supabase/supabase-js";
 
@@ -12,6 +11,7 @@ import {
 } from "./caption-gallery-shared";
 
 import { ReportLoadForm } from "@/components/report-load-form";
+import { StudyHeaderActions } from "@/components/study-header-actions";
 import type { Database, Tables } from "@/src/types/supabase";
 import { formatDurationFromMinutes } from "@/utils/format-duration";
 import { createClient } from "@/utils/supabase/server";
@@ -829,12 +829,7 @@ export default async function StudyDetailPage({ params, searchParams }: StudyDet
               </p>
               <h1 className="text-2xl font-semibold">Study Detail</h1>
             </div>
-            <Link
-              href="/"
-              className="app-button inline-flex rounded-lg px-3 py-2 text-sm font-medium transition"
-            >
-              Home
-            </Link>
+            <StudyHeaderActions studyId={requestedStudyId} />
           </div>
           <p className="app-muted text-sm">
             A study-level vote summary with overall volume, vote mix, and caption-by-caption vote

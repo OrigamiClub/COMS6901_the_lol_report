@@ -1,9 +1,9 @@
-import Link from "next/link";
 import { notFound } from "next/navigation";
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { ReportLoadForm } from "@/components/report-load-form";
 import { StudyVoteTimingTable } from "@/components/study-vote-timing-table";
+import { StudyHeaderActions } from "@/components/study-header-actions";
 import type { Database, Tables } from "@/src/types/supabase";
 import { formatDurationFromMinutes } from "@/utils/format-duration";
 import { createClient } from "@/utils/supabase/server";
@@ -574,12 +574,7 @@ export default async function StudyVoteTimingPage({
               </p>
               <h1 className="text-2xl font-semibold">Study Voting Span by User</h1>
             </div>
-            <Link
-              href="/"
-              className="app-button inline-flex rounded-lg px-3 py-2 text-sm font-medium transition"
-            >
-              Home
-            </Link>
+            <StudyHeaderActions studyId={requestedStudyId} />
           </div>
           <p className="app-muted text-sm">
             Primary metric: <code>last_vote_at_utc - first_vote_at_utc</code> in minutes for each

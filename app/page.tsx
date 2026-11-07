@@ -64,6 +64,16 @@ export default async function Home() {
       href: latestStudyId ? `/study/${latestStudyId}/user-upvote-rate` : null,
     },
     {
+      title: "Votes by humor style and subject",
+      description: "Compare upvote rates across AI tags",
+      href: latestStudyId ? `/study/${latestStudyId}/humor-tags` : null,
+    },
+    {
+      title: "AI meme tagging",
+      description: "Tag memes by humor style and subject",
+      href: "/tagging",
+    },
+    {
       title: "Selected user report",
       description: "Analyze selected raters together",
       href: latestStudyId ? `/study/${latestStudyId}/selected-user-report` : null,
