@@ -2,6 +2,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import type { SupabaseClient } from "@supabase/supabase-js";
 
+import { LikeOverlapGraph, type LikeGraphData } from "@/components/like-overlap-graph";
 import { HumorTagHeatmap, type HeatmapCell, type HeatmapMeme, type HeatmapTag } from "@/components/humor-tag-heatmap";
 import { LocalStudyWindow } from "@/components/local-study-window";
 import { ReportLoadForm } from "@/components/report-load-form";
@@ -127,6 +128,7 @@ type NewStyleReport = {
   user_rows: StudyNewStyleUserTableRow[];
   /** Viewer/liker counts are distinct people, so they sum to the study's seen/liked totals. */
   caption_rows: (StudyNewStyleCaptionTableRow & { viewers: number; likers: number })[];
+  like_graph: LikeGraphData;
 };
 
 const roundNumber = (value: number, digits = 4) => Number(value.toFixed(digits));
@@ -779,6 +781,33 @@ const buildNewStyleReport = ({
     };
   });
 
+  // Participants who liked at least one caption, and how many captions each pair both liked.
+  const graphNodeIndex = new Map<string, number>();
+  const graphNodes: LikeGraphData["nodes"] = [];
+  for (const row of userRows) {
+    if (row.captions_liked === 0) continue;
+    graphNodeIndex.set(row.profile_id, graphNodes.length);
+    graphNodes.push({ label: row.user_label, liked: row.captions_liked, seen: row.captions_seen });
+  }
+  const pairWeights = new Map<number, number>();
+  for (const caption of captionAccumulators.values()) {
+    const likers = [...caption.liker_ids]
+      .map((profileId) => graphNodeIndex.get(profileId))
+      .filter((index): index is number => index !== undefined)
+      .sort((a, b) => a - b);
+    for (let a = 0; a < likers.length; a += 1) {
+      for (let b = a + 1; b < likers.length; b += 1) {
+        const key = (likers[a] as number) * graphNodes.length + (likers[b] as number);
+        pairWeights.set(key, (pairWeights.get(key) ?? 0) + 1);
+      }
+    }
+  }
+  const graphEdges: LikeGraphData["edges"] = [...pairWeights.entries()].map(([key, weight]) => [
+    Math.floor(key / graphNodes.length),
+    key % graphNodes.length,
+    weight,
+  ]);
+
   const totalUserCaptionsSeen = userRows.reduce((total, row) => total + row.captions_seen, 0);
   const totalUserCaptionsLiked = userRows.reduce((total, row) => total + row.captions_liked, 0);
 
@@ -793,6 +822,7 @@ const buildNewStyleReport = ({
     ),
     user_rows: userRows,
     caption_rows: captionRows,
+    like_graph: { nodes: graphNodes, edges: graphEdges },
   };
 };
 
@@ -1064,6 +1094,22 @@ export default async function NewStyleReportPage({
               </Link>
               .
             </p>
+          )}
+        </section>
+
+        <section id="like-overlap-graph" className="scroll-mt-6 space-y-2">
+          <div>
+            <h2 className="text-lg font-semibold">Participants by Shared Likes</h2>
+            <p className="app-muted text-sm">
+              Each dot is a participant who liked at least one caption (bigger = more likes). A line joins two
+              participants who liked the same caption(s); more shared likes = thicker line and a stronger pull
+              together, so clusters are people with similar taste.
+            </p>
+          </div>
+          {report.like_graph.nodes.length > 1 ? (
+            <LikeOverlapGraph data={report.like_graph} />
+          ) : (
+            <p className="app-muted text-sm">Fewer than two participants liked a caption in this study.</p>
           )}
         </section>
 

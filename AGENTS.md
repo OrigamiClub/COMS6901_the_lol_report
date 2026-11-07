@@ -11,6 +11,7 @@
 - TypeScript `^5`
 - Tailwind CSS `^4` with `@tailwindcss/postcss`
 - Recharts `^3.8.0`
+- d3-force `^3` (participant network layout)
 - ESLint `^9` with `eslint-config-next`
 
 ## Repository Layout
@@ -21,7 +22,7 @@
 - `app/reports/new-style-report/page.tsx`: Redirect helper that resolves a selected or latest study ID 7+ into the new study interface report route.
 - `app/reports/study-detail/page.tsx`: Redirect helper that resolves a selected or latest study into the study detail route.
 - `app/study/[id]/engagement-risk/page.tsx`: Protected report page that scores per-user participation risk for a selected study (`/study/<id>/engagement-risk?minVotes=<n>`) using voting speed/read-load, leave-one-out consensus agreement, vote monotony, and polarity extremity.
-- `app/study/[id]/new-style-report/page.tsx`: Protected report page for the newer study interface used by study IDs 7+ (`/study/<id>/new-style-report?minUserNavigationEvents=<n>`), comparing `study_caption_navigation_events` against `study_caption_vote_events` for same-session vote coverage, skip rate, dwell timing, and user/caption breakdowns, plus a like-rate heatmap by AI humor style × image subject (`components/humor-tag-heatmap.tsx`, anchor `#humor-tag-heatmap`) using distinct viewers/likers per caption and the latest tagging run covering the study; clicking a cell lists that cell's memes (image + caption + like rate) below the grid.
+- `app/study/[id]/new-style-report/page.tsx`: Protected report page for the newer study interface used by study IDs 7+ (`/study/<id>/new-style-report?minUserNavigationEvents=<n>`), comparing `study_caption_navigation_events` against `study_caption_vote_events` for same-session vote coverage, skip rate, dwell timing, and user/caption breakdowns, plus a like-rate heatmap by AI humor style × image subject (`components/humor-tag-heatmap.tsx`, anchor `#humor-tag-heatmap`) using distinct viewers/likers per caption and the latest tagging run covering the study; clicking a cell lists that cell's memes (image + caption + like rate) below the grid. Also a participant network (`components/like-overlap-graph.tsx`, `d3-force` layout, anchor `#like-overlap-graph`): nodes are participants with ≥1 like, edges join pairs who liked the same captions, with edge width and pull scaled by shared-like count and a minimum-shared-likes slider.
 - `app/reports/weekly-study-summary/page.tsx`: Protected report page for weekly study analytics from `studies` + caption/vote mappings. Uses lightweight study-level aggregates to chart weighted score, caption volume, vote volume, and votes-per-caption across the loaded study window (`?limit=<n>`).
 - `app/study/[id]/study-detail/page.tsx`: Protected report page that shows basic vote-level detail for one study (`/study/<id>/study-detail`), including overall vote totals, vote distribution, vote timing summary, and caption-level vote coverage.
 - `app/study/[id]/vote-timing/page.tsx`: Protected report page that shows each user's elapsed first-vote-to-last-vote span for a selected study (`/study/<id>/vote-timing?minVotes=<n>`), with KPI cards and an on-page timing table.
