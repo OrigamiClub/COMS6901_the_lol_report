@@ -78,6 +78,7 @@ npm run lint
 - Install/run: `npm install`, `npm run dev`; lint: `npm run lint`; build: `npm run build`.
 - AWS hosting uses the committed `amplify.yml` build spec plus console-managed Amplify GitHub App connections. Staging is `the-lol-report-staging` from the `staging` branch to `stats.slightlyhumorous.org`; production is `the-lol-report-production` from `main` to `stats.humorstudy.org`. Setup notes live in `README.md`.
 - Public routes: `/login` and `/auth/callback`; all others require an authenticated user whose matching `profiles` row has `is_superadmin = true`.
+- To pre-approve a superadmin who hasn't signed in yet, insert their lowercase email into `superadmin_email_invites`; `handle_new_user()` (on `auth.users` insert) creates their profile with `is_superadmin = true` on first sign-in and stamps `accepted_datetime_utc`. Existing users are promoted by updating `profiles.is_superadmin` directly.
 
 ## Authentication sessions
 - Auth cookies are scoped to this app and Supabase project using `getSupabaseAuthCookieOptions`; browser, server, and proxy clients must use the same options.

@@ -4961,6 +4961,38 @@ export type Database = {
           },
         ]
       }
+      superadmin_email_invites: {
+        Row: {
+          accepted_datetime_utc: string | null
+          created_by_user_id: string | null
+          created_datetime_utc: string
+          email: string
+          note: string | null
+        }
+        Insert: {
+          accepted_datetime_utc?: string | null
+          created_by_user_id?: string | null
+          created_datetime_utc?: string
+          email: string
+          note?: string | null
+        }
+        Update: {
+          accepted_datetime_utc?: string | null
+          created_by_user_id?: string | null
+          created_datetime_utc?: string
+          email?: string
+          note?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "superadmin_email_invites_created_by_user_id_fkey"
+            columns: ["created_by_user_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       term_types: {
         Row: {
           created_by_user_id: string
