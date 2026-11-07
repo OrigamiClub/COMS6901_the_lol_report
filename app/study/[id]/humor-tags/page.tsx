@@ -1,9 +1,8 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 
-import { HumorTagHeatmap } from "@/components/humor-tag-heatmap";
 import { ReportLoadForm } from "@/components/report-load-form";
-import { StudyHeaderActions } from "@/components/study-header-actions";
+import { NEW_STYLE_MIN_STUDY_ID, StudyHeaderActions } from "@/components/study-header-actions";
 import { buildStudyTagReport, type TagVoteSummary } from "@/utils/meme-tagging/report";
 import { MEME_TAG_DIMENSION_LABELS } from "@/utils/meme-tagging/schema";
 import { getStudyVoteValueLabel, STUDY_VOTE_VALUE_ORDER } from "@/utils/study-vote-events";
@@ -229,32 +228,15 @@ export default async function HumorTagsPage({ params }: HumorTagsPageProps) {
               </article>
             </section>
 
-            <section className="space-y-2">
-              <h2 className="text-lg font-semibold">
-                {showLikes ? "Like rate" : "Upvote rate"} by humor style × subject
-              </h2>
+            {studyId >= NEW_STYLE_MIN_STUDY_ID ? (
               <p className="app-muted text-sm">
-                Rows are each caption&apos;s primary humor style; columns are its image&apos;s primary subject. Color
-                spans the lowest to highest rate among cells with at least {LOW_SAMPLE_THRESHOLD}{" "}
-                {showLikes ? "views" : "votes"}.
+                The humor style × subject heatmap is on the{" "}
+                <Link href={`/study/${studyId}/new-style-report#humor-tag-heatmap`} className="underline">
+                  new-style report
+                </Link>
+                .
               </p>
-              <HumorTagHeatmap
-                humorStyles={report.humor_style.map(({ tag_id, name, slug }) => ({ id: tag_id, name, slug }))}
-                subjects={report.subject.map(({ tag_id, name, slug }) => ({ id: tag_id, name, slug }))}
-                cells={report.matrix.map((matrixCell) => ({
-                  humor_style_tag_id: matrixCell.humor_style_tag_id,
-                  subject_tag_id: matrixCell.subject_tag_id,
-                  captions: matrixCell.captions,
-                  sample: showLikes ? matrixCell.views : matrixCell.votes,
-                  hits: showLikes ? matrixCell.liked_views : matrixCell.upvotes,
-                }))}
-                metricLabel={showLikes ? "Like rate" : "Upvote rate"}
-                sampleLabel={showLikes ? "views" : "votes"}
-                hitLabel={showLikes ? "liked" : "upvoted"}
-                studyRate={showLikes ? report.study_like_rate : report.study_upvote_rate}
-                minSample={LOW_SAMPLE_THRESHOLD}
-              />
-            </section>
+            ) : null}
 
             <TagTable
               title={MEME_TAG_DIMENSION_LABELS.humor_style}

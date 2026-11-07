@@ -1,6 +1,8 @@
+import Link from "next/link";
 import { notFound } from "next/navigation";
 import type { SupabaseClient } from "@supabase/supabase-js";
 
+import { HumorTagHeatmap, type HeatmapCell, type HeatmapTag } from "@/components/humor-tag-heatmap";
 import { LocalStudyWindow } from "@/components/local-study-window";
 import { ReportLoadForm } from "@/components/report-load-form";
 import { StudyHeaderActions } from "@/components/study-header-actions";
@@ -12,6 +14,7 @@ import {
 } from "@/components/study-new-style-report-tables";
 import type { Database, Tables } from "@/src/types/supabase";
 import { formatDurationFromMinutes } from "@/utils/format-duration";
+import { getStudyPrimaryTags, type StudyPrimaryTags } from "@/utils/meme-tagging/report";
 import { createClient } from "@/utils/supabase/server";
 
 const NEW_STYLE_MIN_STUDY_ID = 7;
@@ -23,6 +26,8 @@ const QUERY_RETRY_ATTEMPTS = 3;
 const QUERY_RETRY_BASE_DELAY_MS = 150;
 const QUERY_PAGE_SIZE = 1000;
 const MS_PER_MINUTE = 1000 * 60;
+/** Heatmap cells seen by fewer people than this are left uncolored. */
+const HEATMAP_MIN_VIEWERS = 30;
 
 type NewStyleReportSearchParams = Promise<{
   minUserNavigationEvents?: string;
@@ -120,7 +125,8 @@ type NewStyleReport = {
   like_rate: number | null;
   median_time_to_next_caption_minutes: number | null;
   user_rows: StudyNewStyleUserTableRow[];
-  caption_rows: StudyNewStyleCaptionTableRow[];
+  /** Viewer/liker counts are distinct people, so they sum to the study's seen/liked totals. */
+  caption_rows: (StudyNewStyleCaptionTableRow & { viewers: number; likers: number })[];
 };
 
 const roundNumber = (value: number, digits = 4) => Number(value.toFixed(digits));
@@ -768,6 +774,8 @@ const buildNewStyleReport = ({
       image_url: image?.url ?? null,
       image_description: image?.image_description ?? null,
       like_rate: computeRate(caption.liker_ids.size, caption.viewer_ids.size),
+      viewers: caption.viewer_ids.size,
+      likers: caption.liker_ids.size,
     };
   });
 
@@ -786,6 +794,54 @@ const buildNewStyleReport = ({
     user_rows: userRows,
     caption_rows: captionRows,
   };
+};
+
+type TagHeatmapData = { humorStyles: HeatmapTag[]; subjects: HeatmapTag[]; cells: HeatmapCell[] };
+
+/**
+ * Groups caption rows by (primary humor style, image's primary subject). Sample is
+ * distinct people who saw a caption, hits distinct people who liked it: the same
+ * rule as this report's headline like rate.
+ */
+const buildTagHeatmap = (
+  rows: NewStyleReport["caption_rows"],
+  captionsById: Map<string, CaptionSummary>,
+  tags: StudyPrimaryTags,
+): TagHeatmapData => {
+  const cells = new Map<string, HeatmapCell>();
+  const totals = { style: new Map<number, number>(), subject: new Map<number, number>() };
+  const tagById = new Map<number, HeatmapTag>();
+
+  for (const row of rows) {
+    const style = tags.styleTagByCaption.get(row.caption_id);
+    const imageId = captionsById.get(row.caption_id)?.image_id;
+    const subject = imageId ? tags.subjectTagByImage.get(imageId) : undefined;
+    if (!style || !subject) continue;
+    tagById.set(style.id, style);
+    tagById.set(subject.id, subject);
+    const key = `${style.id}|${subject.id}`;
+    const cell = cells.get(key) ?? {
+      humor_style_tag_id: style.id,
+      subject_tag_id: subject.id,
+      captions: 0,
+      sample: 0,
+      hits: 0,
+    };
+    cell.captions += 1;
+    cell.sample += row.viewers;
+    cell.hits += row.likers;
+    cells.set(key, cell);
+    totals.style.set(style.id, (totals.style.get(style.id) ?? 0) + row.viewers);
+    totals.subject.set(subject.id, (totals.subject.get(subject.id) ?? 0) + row.viewers);
+  }
+
+  /** Most-seen tags first, so the busiest rows and columns sit top-left. */
+  const ordered = (counts: Map<number, number>) =>
+    [...counts.entries()]
+      .sort((a, b) => b[1] - a[1] || (tagById.get(a[0])?.name ?? "").localeCompare(tagById.get(b[0])?.name ?? ""))
+      .map(([id]) => tagById.get(id) as HeatmapTag);
+
+  return { humorStyles: ordered(totals.style), subjects: ordered(totals.subject), cells: [...cells.values()] };
 };
 
 const formatPercent = (value: number | null) => {
@@ -836,9 +892,10 @@ export default async function NewStyleReportPage({
       ...voteRows.map((row) => row.profile_id),
     ]),
   ];
-  const [profilesById, imagesById] = await Promise.all([
+  const [profilesById, imagesById, primaryTags] = await Promise.all([
     getProfilesById(supabase, profileIds),
     getImagesById(supabase, imageIds),
+    getStudyPrimaryTags(supabase, requestedStudyId, captionIds, imageIds),
   ]);
   const report = buildNewStyleReport({
     study: selectedStudy,
@@ -849,6 +906,7 @@ export default async function NewStyleReportPage({
     imagesById,
     profilesById,
   });
+  const tagHeatmap = primaryTags ? buildTagHeatmap(report.caption_rows, captionsById, primaryTags) : null;
   const thresholdUserRows = report.user_rows.filter(
     (row) => row.navigation_events >= minUserNavigationEventsResult.value,
   );
@@ -954,6 +1012,44 @@ export default async function NewStyleReportPage({
               {report.total_user_captions_seen.toLocaleString()} seen
             </p>
           </article>
+        </section>
+
+        <section id="humor-tag-heatmap" className="scroll-mt-6 space-y-2">
+          <div>
+            <h2 className="text-lg font-semibold">Like Rate by Humor Style × Subject</h2>
+            <p className="app-muted text-sm">
+              Rows are each caption&apos;s primary AI humor style; columns are its image&apos;s primary subject. Rate =
+              people who liked ÷ people who saw the captions in that cell, the same rule as the like rate above. Color
+              spans the lowest to highest rate among cells seen by at least {HEATMAP_MIN_VIEWERS} people.
+            </p>
+            {primaryTags ? (
+              <p className="app-muted text-xs">
+                Tags from run #{primaryTags.run.id} (
+                {primaryTags.run.study_id === null ? "all studies" : `study #${primaryTags.run.study_id}`},{" "}
+                {primaryTags.run.status}) · {primaryTags.run.model_name}
+              </p>
+            ) : null}
+          </div>
+          {tagHeatmap ? (
+            <HumorTagHeatmap
+              humorStyles={tagHeatmap.humorStyles}
+              subjects={tagHeatmap.subjects}
+              cells={tagHeatmap.cells}
+              metricLabel="Like rate"
+              sampleLabel="viewers"
+              hitLabel="liked"
+              studyRate={report.like_rate ?? 0}
+              minSample={HEATMAP_MIN_VIEWERS}
+            />
+          ) : (
+            <p className="app-muted text-sm">
+              This study&apos;s memes haven&apos;t been tagged yet. Start a run on the{" "}
+              <Link href={`/tagging?studyId=${requestedStudyId}`} className="underline">
+                tagging page
+              </Link>
+              .
+            </p>
+          )}
         </section>
 
         <section className="space-y-2">

@@ -32,17 +32,6 @@ export type TagVoteSummary = {
   like_rate: number;
 };
 
-/** Outcomes for captions whose primary humor style and image subject are this pair. */
-export type TagMatrixCell = {
-  humor_style_tag_id: number;
-  subject_tag_id: number;
-  captions: number;
-  votes: number;
-  upvotes: number;
-  views: number;
-  liked_views: number;
-};
-
 export type StudyTagReport = {
   run: Pick<MemeTaggingRunRow, "id" | "status" | "model_name" | "prompt_version" | "created_datetime_utc" | "study_id"> | null;
   study_captions: number;
@@ -56,8 +45,6 @@ export type StudyTagReport = {
   study_like_rate: number;
   humor_style: TagVoteSummary[];
   subject: TagVoteSummary[];
-  /** Humor style × subject combinations that have at least one tagged caption. */
-  matrix: TagMatrixCell[];
 };
 
 const chunk = <T,>(items: T[], size: number): T[][] => {
@@ -116,6 +103,68 @@ const getReportRun = async (supabase: Client, studyId: number) => {
   return latest;
 };
 
+export type MemeTagRef = { id: number; slug: string; name: string };
+
+export type StudyPrimaryTags = {
+  run: NonNullable<StudyTagReport["run"]>;
+  styleTagByCaption: Map<string, MemeTagRef>;
+  subjectTagByImage: Map<string, MemeTagRef>;
+};
+
+/**
+ * Primary humor-style tag per caption and primary subject tag per image from the
+ * latest run covering the study, or null when the study has no tagging run.
+ */
+export const getStudyPrimaryTags = async (
+  supabase: Client,
+  studyId: number,
+  captionIds: string[],
+  imageIds: string[],
+): Promise<StudyPrimaryTags | null> => {
+  const run = await getReportRun(supabase, studyId);
+  if (!run) return null;
+
+  const [captionTags, imageTags] = await Promise.all([
+    fetchByIds(captionIds, "caption tags", (ids, from, to) =>
+      supabase
+        .from("caption_meme_tags")
+        .select("caption_id, meme_tag_id")
+        .eq("run_id", run.id)
+        .eq("is_primary", true)
+        .in("caption_id", ids as string[])
+        .order("caption_id")
+        .range(from, to),
+    ),
+    fetchByIds(imageIds, "image tags", (ids, from, to) =>
+      supabase
+        .from("image_meme_tags")
+        .select("image_id, meme_tag_id")
+        .eq("run_id", run.id)
+        .eq("is_primary", true)
+        .in("image_id", ids as string[])
+        .order("image_id")
+        .range(from, to),
+    ),
+  ]);
+
+  const tagIds = [...new Set([...captionTags, ...imageTags].map((row) => row.meme_tag_id))];
+  const tags = await fetchByIds(tagIds, "tags", (ids, from, to) =>
+    supabase.from("meme_tags").select("id, slug, name").in("id", ids as number[]).order("id").range(from, to),
+  );
+  const tagById = new Map(tags.map((tag) => [tag.id, tag]));
+  const resolve = <K,>(rows: { key: K; meme_tag_id: number }[]) =>
+    new Map(rows.flatMap((row) => {
+      const tag = tagById.get(row.meme_tag_id);
+      return tag ? [[row.key, tag] as const] : [];
+    }));
+
+  return {
+    run,
+    styleTagByCaption: resolve(captionTags.map((row) => ({ key: row.caption_id, meme_tag_id: row.meme_tag_id }))),
+    subjectTagByImage: resolve(imageTags.map((row) => ({ key: row.image_id, meme_tag_id: row.meme_tag_id }))),
+  };
+};
+
 /** Same matching rule as the new-style report: a view is liked if that person liked the caption in that session. */
 const getViewMatchKey = (profileId: string, mappingId: number, sessionId: string | null) =>
   `${profileId}|${mappingId}|${sessionId ?? "no-session"}`;
@@ -126,8 +175,6 @@ const getViewMatchKey = (profileId: string, mappingId: number, sessionId: string
  * record likes, so like rate (liked views / views) is the comparable metric there.
  */
 export const buildStudyTagReport = async (supabase: Client, studyId: number): Promise<StudyTagReport> => {
-  const run = await getReportRun(supabase, studyId);
-
   const mappings: { id: number; caption_id: string }[] = [];
   for (let from = 0; ; from += PAGE_SIZE) {
     const { data, error } = await supabase
@@ -187,56 +234,26 @@ export const buildStudyTagReport = async (supabase: Client, studyId: number): Pr
     study_like_rate: views.length === 0 ? 0 : totalLikedViews / views.length,
   };
 
-  if (!run) {
-    return { run: null, tagged_captions: 0, humor_style: [], subject: [], matrix: [], ...base };
-  }
-
   const captions = await fetchByIds(captionIds, "captions", (ids, from, to) =>
     supabase.from("captions").select("id, image_id").in("id", ids as string[]).order("id").range(from, to),
   );
   const imageByCaptionId = new Map(captions.map((caption) => [caption.id, caption.image_id]));
   const imageIds = [...new Set(captions.map((caption) => caption.image_id).filter((id): id is string => Boolean(id)))];
 
-  const [captionTags, imageTags] = await Promise.all([
-    fetchByIds(captionIds, "caption tags", (ids, from, to) =>
-      supabase
-        .from("caption_meme_tags")
-        .select("caption_id, meme_tag_id")
-        .eq("run_id", run.id)
-        .eq("is_primary", true)
-        .in("caption_id", ids as string[])
-        .order("caption_id")
-        .range(from, to),
-    ),
-    fetchByIds(imageIds, "image tags", (ids, from, to) =>
-      supabase
-        .from("image_meme_tags")
-        .select("image_id, meme_tag_id")
-        .eq("run_id", run.id)
-        .eq("is_primary", true)
-        .in("image_id", ids as string[])
-        .order("image_id")
-        .range(from, to),
-    ),
-  ]);
-
-  const tagIds = [...new Set([...captionTags, ...imageTags].map((row) => row.meme_tag_id))];
-  const tags = await fetchByIds(tagIds, "tags", (ids, from, to) =>
-    supabase.from("meme_tags").select("id, slug, name, dimension").in("id", ids as number[]).order("id").range(from, to),
-  );
-  const tagById = new Map(tags.map((tag) => [tag.id, tag]));
-  const styleTagByCaption = new Map(captionTags.map((row) => [row.caption_id, row.meme_tag_id]));
-  const subjectTagByImage = new Map(imageTags.map((row) => [row.image_id, row.meme_tag_id]));
+  const primaryTags = await getStudyPrimaryTags(supabase, studyId, captionIds, imageIds);
+  if (!primaryTags) {
+    return { run: null, tagged_captions: 0, humor_style: [], subject: [], ...base };
+  }
+  const { run, styleTagByCaption, subjectTagByImage } = primaryTags;
 
   const summaries: Record<MemeTagDimension, Map<number, TagVoteSummary & { captionSet: Set<string> }>> = {
     humor_style: new Map(),
     subject: new Map(),
   };
 
-  const getSummary = (dimension: MemeTagDimension, tagId: number | undefined, captionId: string) => {
-    if (tagId === undefined) return null;
-    const tag = tagById.get(tagId);
+  const getSummary = (dimension: MemeTagDimension, tag: MemeTagRef | undefined, captionId: string) => {
     if (!tag) return null;
+    const tagId = tag.id;
     let summary = summaries[dimension].get(tagId);
     if (!summary) {
       summary = {
@@ -268,38 +285,8 @@ export const buildStudyTagReport = async (supabase: Client, studyId: number): Pr
     ].filter((summary): summary is NonNullable<typeof summary> => summary !== null);
   };
 
-  const matrix = new Map<string, TagMatrixCell & { captionSet: Set<string> }>();
-  /** Cell for the caption's (humor style, subject) pair, or null if either tag is missing. */
-  const matrixCellForCaption = (captionId: string) => {
-    const styleTagId = styleTagByCaption.get(captionId);
-    const imageId = imageByCaptionId.get(captionId);
-    const subjectTagId = imageId ? subjectTagByImage.get(imageId) : undefined;
-    if (styleTagId === undefined || subjectTagId === undefined) return null;
-    if (!tagById.has(styleTagId) || !tagById.has(subjectTagId)) return null;
-    const key = `${styleTagId}|${subjectTagId}`;
-    let matrixCell = matrix.get(key);
-    if (!matrixCell) {
-      matrixCell = {
-        humor_style_tag_id: styleTagId,
-        subject_tag_id: subjectTagId,
-        captions: 0,
-        votes: 0,
-        upvotes: 0,
-        views: 0,
-        liked_views: 0,
-        captionSet: new Set(),
-      };
-      matrix.set(key, matrixCell);
-    }
-    matrixCell.captionSet.add(captionId);
-    return matrixCell;
-  };
-
   // Register every tagged caption (so captions with no votes or views still count).
-  for (const captionId of captionIds) {
-    summariesForCaption(captionId);
-    matrixCellForCaption(captionId);
-  }
+  for (const captionId of captionIds) summariesForCaption(captionId);
 
   for (const vote of votes) {
     const captionId = vote.study_caption_mapping_id === null ? undefined : captionByMappingId.get(vote.study_caption_mapping_id);
@@ -310,11 +297,6 @@ export const buildStudyTagReport = async (supabase: Client, studyId: number): Pr
       summary.distribution[voteValue] += 1;
       if (isPositiveStudyVote(voteValue)) summary.upvotes += 1;
     }
-    const matrixCell = matrixCellForCaption(captionId);
-    if (matrixCell) {
-      matrixCell.votes += 1;
-      if (isPositiveStudyVote(voteValue)) matrixCell.upvotes += 1;
-    }
   }
 
   for (const view of views) {
@@ -324,11 +306,6 @@ export const buildStudyTagReport = async (supabase: Client, studyId: number): Pr
     for (const summary of summariesForCaption(captionId)) {
       summary.views += 1;
       if (liked) summary.liked_views += 1;
-    }
-    const matrixCell = matrixCellForCaption(captionId);
-    if (matrixCell) {
-      matrixCell.views += 1;
-      if (liked) matrixCell.liked_views += 1;
     }
   }
 
@@ -347,7 +324,6 @@ export const buildStudyTagReport = async (supabase: Client, studyId: number): Pr
     tagged_captions: captionIds.filter((captionId) => styleTagByCaption.has(captionId)).length,
     humor_style: finalize("humor_style"),
     subject: finalize("subject"),
-    matrix: [...matrix.values()].map(({ captionSet, ...matrixCell }) => ({ ...matrixCell, captions: captionSet.size })),
     ...base,
   };
 };
