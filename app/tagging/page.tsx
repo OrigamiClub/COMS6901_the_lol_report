@@ -1,5 +1,6 @@
 import Link from "next/link";
 
+import { StudyHeaderActions } from "@/components/study-header-actions";
 import { TaggingRunProgress } from "@/components/tagging-run-progress";
 import { TaggingTaxonomyEditor } from "@/components/tagging-taxonomy-editor";
 import { getMemeTaggingModelName, isGeminiConfigured } from "@/utils/meme-tagging/gemini";
@@ -46,9 +47,13 @@ export default async function TaggingPage({ searchParams }: TaggingPageProps) {
               <p className="app-kicker text-xs font-semibold uppercase tracking-[0.24em]">Humor Study Stats</p>
               <h1 className="text-2xl font-semibold">AI Meme Tagging</h1>
             </div>
-            <Link href="/" className="app-button inline-flex rounded-lg px-3 py-2 text-sm font-medium transition">
-              Home
-            </Link>
+            {initialStudyId !== null ? (
+              <StudyHeaderActions studyId={initialStudyId} current="tagging" />
+            ) : (
+              <Link href="/" className="app-button inline-flex rounded-lg px-3 py-2 text-sm font-medium transition">
+                Home
+              </Link>
+            )}
           </div>
           <p className="app-muted text-sm">
             Tags study images by <strong>subject matter</strong> and study captions by <strong>humor style</strong>{" "}

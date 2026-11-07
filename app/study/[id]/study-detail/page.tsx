@@ -829,7 +829,7 @@ export default async function StudyDetailPage({ params, searchParams }: StudyDet
               </p>
               <h1 className="text-2xl font-semibold">Study Detail</h1>
             </div>
-            <StudyHeaderActions studyId={requestedStudyId} />
+            <StudyHeaderActions studyId={requestedStudyId} current="study-detail" />
           </div>
           <p className="app-muted text-sm">
             A study-level vote summary with overall volume, vote mix, and caption-by-caption vote

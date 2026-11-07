@@ -191,7 +191,7 @@ export default async function HumorTagsPage({ params }: HumorTagsPageProps) {
         {!report.run ? (
           <p className="app-card rounded-lg px-3 py-2 text-sm">
             No tagging runs yet. Approve the taxonomies and start a run on the{" "}
-            <Link href="/tagging" className="underline">
+            <Link href={`/tagging?studyId=${studyId}`} className="underline">
               tagging page
             </Link>
             .
