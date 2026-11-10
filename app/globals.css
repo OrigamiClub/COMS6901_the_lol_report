@@ -697,3 +697,17 @@ html.dark .app-heat-cell {
 html.dark .app-heat-legend {
   background: var(--heat-legend-dark);
 }
+
+/* Participant network group colors: categorical slots 1-3 (validated all-pairs) + neutral for smaller groups. */
+:root {
+  --graph-group-1: #2a78d6;
+  --graph-group-2: #eb6834;
+  --graph-group-3: #1baf7a;
+  --graph-group-other: #8f8e89;
+}
+html.dark {
+  --graph-group-1: #3987e5;
+  --graph-group-2: #d95926;
+  --graph-group-3: #199e70;
+  --graph-group-other: #6f6e69;
+}

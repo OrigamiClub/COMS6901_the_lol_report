@@ -787,14 +787,29 @@ const buildNewStyleReport = ({
   for (const row of userRows) {
     if (row.captions_liked === 0) continue;
     graphNodeIndex.set(row.profile_id, graphNodes.length);
-    graphNodes.push({ label: row.user_label, liked: row.captions_liked, seen: row.captions_seen });
+    graphNodes.push({
+      label: row.user_label,
+      liked: row.captions_liked,
+      seen: row.captions_seen,
+      liked_captions: [],
+    });
   }
+  const graphCaptions: LikeGraphData["captions"] = [];
   const pairWeights = new Map<number, number>();
   for (const caption of captionAccumulators.values()) {
     const likers = [...caption.liker_ids]
       .map((profileId) => graphNodeIndex.get(profileId))
       .filter((index): index is number => index !== undefined)
       .sort((a, b) => a - b);
+    if (likers.length > 0) {
+      const captionIndex = graphCaptions.length;
+      graphCaptions.push({
+        caption_id: caption.caption_id,
+        text: getCaptionPreview(caption.caption_id, captionsById.get(caption.caption_id)),
+        style: null,
+      });
+      for (const liker of likers) graphNodes[liker]?.liked_captions.push(captionIndex);
+    }
     for (let a = 0; a < likers.length; a += 1) {
       for (let b = a + 1; b < likers.length; b += 1) {
         const key = (likers[a] as number) * graphNodes.length + (likers[b] as number);
@@ -822,7 +837,7 @@ const buildNewStyleReport = ({
     ),
     user_rows: userRows,
     caption_rows: captionRows,
-    like_graph: { nodes: graphNodes, edges: graphEdges },
+    like_graph: { nodes: graphNodes, edges: graphEdges, captions: graphCaptions },
   };
 };
 
@@ -1107,7 +1122,15 @@ export default async function NewStyleReportPage({
             </p>
           </div>
           {report.like_graph.nodes.length > 1 ? (
-            <LikeOverlapGraph data={report.like_graph} />
+            <LikeOverlapGraph
+              data={{
+                ...report.like_graph,
+                captions: report.like_graph.captions.map((caption) => ({
+                  ...caption,
+                  style: primaryTags?.styleTagByCaption.get(caption.caption_id)?.name ?? null,
+                })),
+              }}
+            />
           ) : (
             <p className="app-muted text-sm">Fewer than two participants liked a caption in this study.</p>
           )}
