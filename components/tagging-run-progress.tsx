@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useRef, useState, useTransition } from "react";
 
@@ -37,9 +38,15 @@ type TaggingRunProgressProps = {
   studies: StudyOption[];
   /** Pre-selects this study in the run scope picker (from `/tagging?studyId=`). */
   initialStudyId: number | null;
+  /** Latest run for the selected scope (that study, or all studies). */
   run: RunSummary | null;
   notes: RunNote[];
+  /** Runs still in progress for other scopes. */
+  otherRunningRuns: { id: number; study_id: number | null }[];
 };
+
+const scopeLabel = (studyId: number | null) => (studyId === null ? "all studies" : `study #${studyId}`);
+const scopeHref = (studyId: number | null) => (studyId === null ? "/tagging" : `/tagging?studyId=${studyId}`);
 
 type LiveProgress = Pick<RunSummary, "done" | "errored" | "captions_done" | "total">;
 
@@ -50,6 +57,7 @@ export function TaggingRunProgress({
   initialStudyId,
   run,
   notes,
+  otherRunningRuns,
 }: TaggingRunProgressProps) {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
@@ -58,6 +66,13 @@ export function TaggingRunProgress({
   const [error, setError] = useState<string | null>(null);
   const stopRequested = useRef(false);
   const [scope, setScope] = useState<string>(initialStudyId === null ? "all" : initialStudyId.toString());
+  const selectedStudyId = scope === "all" ? null : Number.parseInt(scope, 10);
+
+  /** Switching scope reloads the page so the panel shows that scope's own latest run. */
+  const changeScope = (value: string) => {
+    setScope(value);
+    router.replace(scopeHref(value === "all" ? null : Number.parseInt(value, 10)), { scroll: false });
+  };
 
   const progress: LiveProgress | null = live ?? (run ? { done: run.done, errored: run.errored, captions_done: run.captions_done, total: run.total } : null);
   const percent = progress && progress.total > 0 ? Math.round((progress.done / progress.total) * 100) : 0;
@@ -91,7 +106,7 @@ export function TaggingRunProgress({
   const handleStart = () => {
     setError(null);
     startTransition(async () => {
-      const result = await startRunAction(scope === "all" ? null : Number.parseInt(scope, 10));
+      const result = await startRunAction(selectedStudyId);
       if (!result.ok) {
         setError(result.error);
         return;
@@ -116,15 +131,14 @@ export function TaggingRunProgress({
     <section className="app-card space-y-4 rounded-xl p-4">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
-          <h2 className="text-lg font-semibold">Tagging run</h2>
+          <h2 className="text-lg font-semibold">Tagging run · {scopeLabel(selectedStudyId)}</h2>
           {run ? (
             <p className="app-muted text-xs">
-              Run #{run.id} · {run.study_id === null ? "all studies" : `study #${run.study_id}`} · {run.status} ·{" "}
-              {run.model_name} · {run.prompt_version} · started{" "}
-              {new Date(run.created_datetime_utc).toLocaleString()}
+              Latest run for {scopeLabel(run.study_id)}: #{run.id} · {run.status} · {run.model_name} ·{" "}
+              {run.prompt_version} · started {new Date(run.created_datetime_utc).toLocaleString()}
             </p>
           ) : (
-            <p className="app-muted text-xs">No runs yet.</p>
+            <p className="app-muted text-xs">No runs for {scopeLabel(selectedStudyId)} yet.</p>
           )}
         </div>
         <div className="flex flex-wrap gap-2">
@@ -177,7 +191,7 @@ export function TaggingRunProgress({
           <select
             id="tagging-run-scope"
             value={scope}
-            onChange={(event) => setScope(event.target.value)}
+            onChange={(event) => changeScope(event.target.value)}
             disabled={isPending || isLooping}
             className="app-input h-9 max-w-64 rounded-md px-2 text-sm outline-none"
           >
@@ -195,15 +209,29 @@ export function TaggingRunProgress({
             title={canStart ? undefined : "Approve at least one tag in each taxonomy first."}
             className="app-button rounded-md px-3 py-1.5 text-sm disabled:cursor-not-allowed disabled:opacity-60"
           >
-            {run ? "Start new run" : "Start run"}
+            {run ? `Start new run for ${scopeLabel(selectedStudyId)}` : `Start run for ${scopeLabel(selectedStudyId)}`}
           </button>
         </div>
       </div>
 
       {run && isRunning ? (
         <p className="app-muted text-xs">
-          Starting a new run snapshots the currently active tags and cancels the running one. Old runs and their tags
-          are kept for comparison.
+          Starting a new run snapshots the currently active tags and cancels this run (runs for other studies keep
+          going). Old runs and their tags are kept for comparison.
+        </p>
+      ) : null}
+
+      {otherRunningRuns.length > 0 ? (
+        <p className="app-muted text-xs">
+          Also in progress:{" "}
+          {otherRunningRuns.map((other, index) => (
+            <span key={other.id}>
+              {index > 0 ? ", " : ""}
+              <Link href={scopeHref(other.study_id)} className="underline">
+                run #{other.id} ({scopeLabel(other.study_id)})
+              </Link>
+            </span>
+          ))}
         </p>
       ) : null}
 
@@ -223,7 +251,7 @@ export function TaggingRunProgress({
             />
           </div>
           <p className="text-sm">
-            {progress.done} / {progress.total} images ({percent}%) · {progress.captions_done} captions tagged
+            {scopeLabel(selectedStudyId)}: {progress.done} / {progress.total} images ({percent}%) · {progress.captions_done} captions tagged
             {progress.errored > 0 ? ` · ${progress.errored} failed` : ""}
             {run && run.unfit > 0 ? ` · ${run.unfit} with "no tag fit" notes` : ""}
             {isLooping ? " · working…" : ""}

@@ -4,7 +4,13 @@ import { StudyHeaderActions } from "@/components/study-header-actions";
 import { TaggingRunProgress } from "@/components/tagging-run-progress";
 import { TaggingTaxonomyEditor } from "@/components/tagging-taxonomy-editor";
 import { getMemeTaggingModelName, isGeminiConfigured } from "@/utils/meme-tagging/gemini";
-import { getLatestRun, getRunProgress, listMemeTags, listUnfitNotes } from "@/utils/meme-tagging/queries";
+import {
+  getLatestRun,
+  getRunProgress,
+  listMemeTags,
+  listRunningRuns,
+  listUnfitNotes,
+} from "@/utils/meme-tagging/queries";
 import { MEME_TAG_DIMENSIONS } from "@/utils/meme-tagging/schema";
 import { createClient } from "@/utils/supabase/server";
 
@@ -18,14 +24,17 @@ export default async function TaggingPage({ searchParams }: TaggingPageProps) {
   const { studyId: rawStudyId } = await searchParams;
   const requestedStudyId = Number.parseInt(Array.isArray(rawStudyId) ? (rawStudyId[0] ?? "") : (rawStudyId ?? ""), 10);
   const supabase = await createClient();
-  const [tags, latestRun, studiesResult] = await Promise.all([
+  const [tags, studiesResult, runningRuns] = await Promise.all([
     listMemeTags(supabase),
-    getLatestRun(supabase),
     supabase.from("studies").select("id, slug").order("id", { ascending: false }),
+    listRunningRuns(supabase),
   ]);
   if (studiesResult.error) throw new Error(`Unable to load studies: ${studiesResult.error.message}`);
   const studies = studiesResult.data ?? [];
   const initialStudyId = studies.some((study) => study.id === requestedStudyId) ? requestedStudyId : null;
+  // The run panel always shows the latest run for the selected scope, never another study's run.
+  const latestRun = await getLatestRun(supabase, initialStudyId);
+  const otherRunningRuns = runningRuns.filter((running) => running.id !== latestRun?.id);
   const [progress, notes] = latestRun
     ? await Promise.all([getRunProgress(supabase, latestRun.id), listUnfitNotes(supabase, latestRun.id)])
     : [null, []];
@@ -82,6 +91,8 @@ export default async function TaggingPage({ searchParams }: TaggingPageProps) {
         </div>
 
         <TaggingRunProgress
+          key={initialStudyId ?? "all"}
+          otherRunningRuns={otherRunningRuns.map(({ id, study_id }) => ({ id, study_id }))}
           aiEnabled={geminiConfigured}
           canStart={activeCounts.subject > 0 && activeCounts.humor_style > 0}
           studies={studies}

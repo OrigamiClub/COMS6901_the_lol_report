@@ -92,15 +92,26 @@ export const getActiveTaxonomy = async (supabase: Client): Promise<TaxonomySnaps
   return snapshot;
 };
 
-export const getLatestRun = async (supabase: Client): Promise<MemeTaggingRunRow | null> => {
-  const { data, error } = await supabase
-    .from("meme_tagging_runs")
-    .select("*")
+/** Latest run for one scope: a single study, or `null` for runs over all studies. */
+export const getLatestRun = async (supabase: Client, studyId: number | null): Promise<MemeTaggingRunRow | null> => {
+  const query = supabase.from("meme_tagging_runs").select("*");
+  const { data, error } = await (studyId === null ? query.is("study_id", null) : query.eq("study_id", studyId))
     .order("id", { ascending: false })
     .limit(1)
     .maybeSingle();
   if (error) fail("Unable to load tagging runs", error);
   return data;
+};
+
+/** Runs still marked running, newest first (for "also in progress" notices). */
+export const listRunningRuns = async (supabase: Client) => {
+  const { data, error } = await supabase
+    .from("meme_tagging_runs")
+    .select("id, study_id, created_datetime_utc")
+    .eq("status", "running")
+    .order("id", { ascending: false });
+  if (error) fail("Unable to load running tagging runs", error);
+  return data ?? [];
 };
 
 export const getRun = async (supabase: Client, runId: number): Promise<MemeTaggingRunRow> => {

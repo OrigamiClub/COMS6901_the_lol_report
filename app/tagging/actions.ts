@@ -175,10 +175,11 @@ export const startRunAction = async (studyId: number | null = null): Promise<Act
     }
 
     const modelName = getMemeTaggingModelName();
-    const { error: cancelError } = await supabase
-      .from("meme_tagging_runs")
-      .update({ status: "cancelled" })
-      .eq("status", "running");
+    // Only a running run with the same scope is replaced; runs for other studies keep going.
+    const runningForScope = supabase.from("meme_tagging_runs").update({ status: "cancelled" }).eq("status", "running");
+    const { error: cancelError } = await (studyId === null
+      ? runningForScope.is("study_id", null)
+      : runningForScope.eq("study_id", studyId));
     if (cancelError) throw new Error(`Unable to close previous runs: ${cancelError.message}`);
 
     const { data, error } = await supabase
