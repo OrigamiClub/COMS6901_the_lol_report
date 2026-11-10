@@ -7,6 +7,8 @@ import {
   forceLink,
   forceManyBody,
   forceSimulation,
+  forceX,
+  forceY,
   type SimulationLinkDatum,
   type SimulationNodeDatum,
 } from "d3-force";
@@ -29,6 +31,12 @@ type LayoutLink = SimulationLinkDatum<LayoutNode> & { value: number };
 type Pair = { a: number; b: number; shared: number; similarity: number };
 
 type EdgeMode = "shared" | "similarity";
+type LayoutMode = "grouped" | "network";
+
+const LAYOUT_OPTIONS: { value: LayoutMode; label: string }[] = [
+  { value: "grouped", label: "By group" },
+  { value: "network", label: "Free" },
+];
 
 const DEFAULT_NEIGHBORS = 3;
 const MAX_NEIGHBORS = 10;
@@ -77,6 +85,7 @@ export function LikeOverlapGraph({ data }: { data: LikeGraphData }) {
   const [hovered, setHovered] = useState<number | null>(null);
   const [pinned, setPinned] = useState<number | null>(null);
   const [selectedGroup, setSelectedGroup] = useState<number | null>(null);
+  const [layoutMode, setLayoutMode] = useState<LayoutMode>("grouped");
   const focus = hovered ?? pinned;
 
   const pairs = useMemo<Pair[]>(
@@ -219,27 +228,68 @@ export function LikeOverlapGraph({ data }: { data: LikeGraphData }) {
       value: edge.value,
     }));
 
-    forceSimulation(nodes)
+    const grouped = layoutMode === "grouped";
+    const groupOfNode = (node: LayoutNode) => graph.groupOf.get(node.index);
+    const sameGroup = (link: LayoutLink) =>
+      groupOfNode(link.source as LayoutNode) === groupOfNode(link.target as LayoutNode);
+
+    // Grouped view: each group gets an anchor on a ring (largest first, clockwise from the top),
+    // with the ring sized so neighboring groups don't overlap.
+    const groupSizes = new Map<number, number>();
+    for (const group of graph.groupOf.values()) groupSizes.set(group, (groupSizes.get(group) ?? 0) + 1);
+    const groupIds = [...groupSizes.keys()].sort((a, b) => a - b);
+    const clusterRadius = (group: number) => 14 * Math.sqrt(groupSizes.get(group) ?? 1) + 10;
+    const circumference = groupIds.reduce((sum, group) => sum + 2 * clusterRadius(group) + 30, 0);
+    const ringRadius = groupIds.length > 1 ? Math.max(circumference / (2 * Math.PI), 80) : 0;
+    const anchors = new Map<number, { x: number; y: number }>();
+    let travelled = 0;
+    for (const group of groupIds) {
+      const arc = 2 * clusterRadius(group) + 30;
+      const angle = ((travelled + arc / 2) / circumference) * 2 * Math.PI - Math.PI / 2;
+      anchors.set(group, { x: ringRadius * Math.cos(angle), y: ringRadius * Math.sin(angle) });
+      travelled += arc;
+    }
+    const anchorOf = (node: LayoutNode) => anchors.get(groupOfNode(node) ?? -1) ?? { x: 0, y: 0 };
+
+    const simulation = forceSimulation(nodes)
       .force(
         "link",
         forceLink<LayoutNode, LayoutLink>(links)
-          .distance((link) => 25 + 90 * (1 - strength(link.value)))
-          .strength((link) => 0.15 + 0.6 * strength(link.value)),
+          .distance((link) => (grouped && !sameGroup(link) ? 160 : 25 + 90 * (1 - strength(link.value))))
+          .strength((link) =>
+            grouped && !sameGroup(link) ? 0.01 : 0.15 + 0.6 * strength(link.value),
+          ),
       )
-      .force("charge", forceManyBody().strength(-40))
-      .force("center", forceCenter(0, 0))
-      .force("collide", forceCollide<LayoutNode>((node) => radius(node.index) + 2))
-      .stop()
-      .tick(LAYOUT_TICKS);
+      .force("charge", forceManyBody().strength(grouped ? -25 : -40))
+      .force("collide", forceCollide<LayoutNode>((node) => radius(node.index) + 2));
+    if (grouped) {
+      simulation
+        .force("groupX", forceX<LayoutNode>((node) => anchorOf(node).x).strength(0.25))
+        .force("groupY", forceY<LayoutNode>((node) => anchorOf(node).y).strength(0.25));
+    } else {
+      simulation.force("center", forceCenter(0, 0));
+    }
+    simulation.stop().tick(LAYOUT_TICKS);
+
+    // Label position per group: centered above its members.
+    const labels = grouped
+      ? groupIds.flatMap((group) => {
+          const members = nodes.filter((node) => groupOfNode(node) === group);
+          if (members.length < MIN_GROUP_SIZE) return [];
+          const xs = members.map((node) => node.x ?? 0);
+          const top = Math.min(...members.map((node) => (node.y ?? 0) - radius(node.index)));
+          return [{ group, x: (Math.min(...xs) + Math.max(...xs)) / 2, y: top - 8 }];
+        })
+      : [];
 
     const xs = nodes.map((node) => node.x ?? 0);
     const ys = nodes.map((node) => node.y ?? 0);
     const minX = Math.min(0, ...xs) - PADDING;
-    const minY = Math.min(0, ...ys) - PADDING;
+    const minY = Math.min(0, ...ys, ...labels.map((label) => label.y - 12)) - PADDING;
     const width = Math.max(...xs, 0) + PADDING - minX;
     const height = Math.max(...ys, 0) + PADDING - minY;
-    return { nodes, links, low, high, viewBox: `${minX} ${minY} ${Math.max(width, 1)} ${Math.max(height, 1)}` };
-  }, [graph, mode, data.nodes, maxLiked]);
+    return { nodes, links, labels, low, high, viewBox: `${minX} ${minY} ${Math.max(width, 1)} ${Math.max(height, 1)}` };
+  }, [graph, mode, data.nodes, maxLiked, layoutMode]);
 
   const edgeWidth = (value: number) =>
     layout.high === layout.low ? 2 : 0.6 + 4.4 * ((value - layout.low) / (layout.high - layout.low));
@@ -308,6 +358,23 @@ export function LikeOverlapGraph({ data }: { data: LikeGraphData }) {
             ))}
           </div>
         </fieldset>
+        <fieldset className="space-y-1">
+          <legend className="app-muted mb-1">Layout</legend>
+          <div className="flex gap-1" role="radiogroup">
+            {LAYOUT_OPTIONS.map((option) => (
+              <button
+                key={option.value}
+                type="button"
+                role="radio"
+                aria-checked={layoutMode === option.value}
+                onClick={() => setLayoutMode(option.value)}
+                className={`app-button rounded-md px-3 py-1 text-sm ${layoutMode === option.value ? "app-button-primary" : ""}`}
+              >
+                {option.label}
+              </button>
+            ))}
+          </div>
+        </fieldset>
         <label className="app-muted space-y-1">
           <span className="block">Closest matches per person: {neighbors}</span>
           <input
@@ -329,7 +396,12 @@ export function LikeOverlapGraph({ data }: { data: LikeGraphData }) {
           {graph.edges.length.toLocaleString()} lines
         </p>
       </div>
-      <p className="app-muted text-xs">{modeOption?.description}</p>
+      <p className="app-muted text-xs">
+        {modeOption?.description}
+        {layoutMode === "grouped"
+          ? " By group: each group is pulled to its own spot, so lines between groups are long and faint."
+          : " Free: positions come only from the lines, so groups can overlap."}
+      </p>
 
       <div className="app-table-shell overflow-hidden rounded-xl">
         <svg
@@ -358,7 +430,16 @@ export function LikeOverlapGraph({ data }: { data: LikeGraphData }) {
                   x2={target.x}
                   y2={target.y}
                   style={{ stroke: emphasized ? "var(--foreground)" : "var(--muted)" }}
-                  strokeOpacity={!anySelection ? 0.28 : emphasized ? 0.75 : 0.05}
+                  strokeOpacity={
+                    anySelection
+                      ? emphasized
+                        ? 0.75
+                        : 0.05
+                      : layoutMode === "grouped" &&
+                          graph.groupOf.get(source.index) !== graph.groupOf.get(target.index)
+                        ? 0.08
+                        : 0.28
+                  }
                   strokeWidth={edgeWidth(link.value)}
                   strokeLinecap="round"
                 />
@@ -400,6 +481,28 @@ export function LikeOverlapGraph({ data }: { data: LikeGraphData }) {
                 </g>
               );
             })}
+          </g>
+          <g aria-hidden="true">
+            {layout.labels.map((label) => (
+              <text
+                key={label.group}
+                x={label.x}
+                y={label.y}
+                textAnchor="middle"
+                fontSize={12}
+                fontWeight={600}
+                style={{
+                  fill: "var(--foreground)",
+                  opacity: selectedGroup === null || selectedGroup === label.group ? 1 : 0.3,
+                  paintOrder: "stroke",
+                  stroke: "var(--background)",
+                  strokeWidth: 3,
+                }}
+                className="pointer-events-none select-none"
+              >
+                Group {label.group + 1}
+              </text>
+            ))}
           </g>
         </svg>
       </div>
