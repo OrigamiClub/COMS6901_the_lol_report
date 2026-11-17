@@ -40,12 +40,16 @@ const LAYOUT_OPTIONS: { value: LayoutMode; label: string }[] = [
 
 const DEFAULT_NEIGHBORS = 3;
 const MAX_NEIGHBORS = 10;
-/** People with fewer likes than this look "similar" by chance, so they're hidden by default. */
-const DEFAULT_MIN_LIKES = 5;
+/** Everyone with at least one like is shown by default; raise it to drop people whose overlap could be chance. */
+const DEFAULT_MIN_LIKES = 1;
 /** Groups smaller than this aren't summarized. */
 const MIN_GROUP_SIZE = 3;
-/** Only the first three categorical colors stay distinguishable for every pair of dots. */
-const GROUP_COLOR_COUNT = 3;
+/**
+ * Groups get the eight categorical colors in order; larger group numbers fall back to gray.
+ * Beyond the first three, some color pairs are close for color-blind viewers, so every group
+ * also carries a "Group N" label (on the graph, the group cards, and hover).
+ */
+const GROUP_COLOR_COUNT = 8;
 const TOP_GROUP_CAPTIONS = 3;
 /** A caption must be liked by at least this share of a group to count as a group favorite. */
 const MIN_GROUP_LIKE_SHARE = 0.3;
@@ -68,8 +72,14 @@ const MODE_OPTIONS: { value: EdgeMode; label: string; description: string }[] = 
   },
 ];
 
+/** Light-mode values, used as fallbacks if the theme variables aren't loaded (so dots never render black). */
+const GROUP_COLOR_FALLBACKS = ["#2a78d6", "#eb6834", "#1baf7a", "#eda100", "#e87ba4", "#008300", "#6250d6", "#e34948"];
+const OTHER_GROUP_FALLBACK = "#8f8e89";
+
 const groupColor = (group: number | undefined) =>
-  group !== undefined && group < GROUP_COLOR_COUNT ? `var(--graph-group-${group + 1})` : "var(--graph-group-other)";
+  group !== undefined && group < GROUP_COLOR_COUNT
+    ? `var(--graph-group-${group + 1}, ${GROUP_COLOR_FALLBACKS[group] ?? OTHER_GROUP_FALLBACK})`
+    : `var(--graph-group-other, ${OTHER_GROUP_FALLBACK})`;
 
 const formatPercent = (value: number) => `${Math.round(value * 100)}%`;
 const formatPoints = (value: number) => `${value >= 0 ? "+" : "−"}${Math.abs(Math.round(value * 100))} pts`;
@@ -534,8 +544,8 @@ export function LikeOverlapGraph({ data }: { data: LikeGraphData }) {
       <section className="space-y-2">
         <h3 className="text-base font-semibold">Groups</h3>
         <p className="app-muted text-xs">
-          Found automatically from the lines above (Louvain clustering), largest first. The three largest get their own
-          color; smaller groups are gray. Favorites are captions liked by at least {formatPercent(MIN_GROUP_LIKE_SHARE)} of
+          Found automatically from the lines above (Louvain clustering), largest first. The eight largest get their own color; any
+          beyond that are gray. Favorites are captions liked by at least {formatPercent(MIN_GROUP_LIKE_SHARE)} of
           the group, ranked by how much more the group liked them than everyone shown (group % vs everyone %).
         </p>
         <ul className="grid gap-2 md:grid-cols-2">
