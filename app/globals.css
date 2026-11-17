@@ -711,3 +711,38 @@ html.dark {
   --graph-group-3: #199e70;
   --graph-group-other: #6f6e69;
 }
+
+/* Featured dashboard tile: the same gradient as the primary button (the old "Latest Study" button).
+   A soft text shadow keeps white text legible over the lighter orange and blue ends. */
+.app-feature-card {
+  border: 0;
+  background: var(--accent-strong);
+  color: #fffaf6;
+  box-shadow: var(--accent-shadow);
+  text-shadow: 0 1px 2px rgba(15, 23, 42, 0.45);
+}
+html.dark .app-feature-card {
+  color: #04111d;
+  text-shadow: none;
+}
+.app-feature-card .app-muted,
+.app-feature-card .app-kicker {
+  color: inherit;
+  opacity: 0.92;
+}
+.app-feature-button {
+  text-shadow: none;
+  background: rgba(255, 255, 255, 0.95);
+  color: #122033;
+  box-shadow: 0 6px 16px rgba(15, 23, 42, 0.18);
+}
+.app-feature-button:hover {
+  background: #ffffff;
+}
+html.dark .app-feature-button {
+  background: rgba(4, 17, 29, 0.9);
+  color: #edf6ff;
+}
+html.dark .app-feature-button:hover {
+  background: #04111d;
+}

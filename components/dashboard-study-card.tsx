@@ -65,17 +65,23 @@ export function DashboardStudyCard({ study, summary, tagStatus, featured = false
   ];
 
   return (
-    <article className={`app-card flex h-full flex-col gap-3 rounded-xl ${featured ? "p-6" : "p-4"}`}>
+    <article
+      className={`flex h-full flex-col gap-3 rounded-xl ${featured ? "app-feature-card p-6 sm:p-8" : "app-card p-4"}`}
+    >
       <div className="min-w-0 space-y-1">
         <p className="app-kicker flex flex-wrap items-center gap-2 text-xs font-semibold uppercase tracking-wide">
           {featured ? "Latest study" : `Study #${study.id}`}
           {study.is_hidden ? (
-            <span className="rounded border border-[var(--card-border)] px-1.5 py-0.5 normal-case tracking-normal">
+            <span
+              className={`rounded border px-1.5 py-0.5 normal-case tracking-normal ${
+                featured ? "border-current" : "border-[var(--card-border)]"
+              }`}
+            >
               hidden
             </span>
           ) : null}
         </p>
-        <h3 className={`font-semibold break-words ${featured ? "text-2xl" : "text-base"}`}>
+        <h3 className={`font-semibold break-words ${featured ? "text-2xl sm:text-3xl" : "text-base"}`}>
           {featured ? `#${study.id} ` : ""}
           {study.slug ?? "Untitled study"}
         </h3>
@@ -88,12 +94,16 @@ export function DashboardStudyCard({ study, summary, tagStatus, featured = false
       <div className="mt-auto flex flex-wrap items-center gap-2 pt-1">
         <Link
           href={studyMainHref(study.id)}
-          className={`app-button ${featured ? "app-button-primary px-4 py-2" : "px-3 py-1.5"} rounded-lg text-sm font-medium transition`}
+          className={`${featured ? "app-feature-button px-4 py-2 font-semibold" : "app-button px-3 py-1.5 font-medium"} rounded-lg text-sm transition`}
         >
           Open report
         </Link>
         {quickLinks.map((link) => (
-          <Link key={link.href} href={link.href} className="app-muted text-xs underline-offset-2 hover:underline">
+          <Link
+            key={link.href}
+            href={link.href}
+            className={`app-muted text-xs underline-offset-2 ${featured ? "font-medium underline" : "hover:underline"}`}
+          >
             {link.label}
           </Link>
         ))}
