@@ -3012,6 +3012,13 @@ export type Database = {
             referencedRelation: "studies"
             referencedColumns: ["id"]
           },
+          {
+            foreignKeyName: "meme_tagging_runs_study_id_fkey"
+            columns: ["study_id"]
+            isOneToOne: false
+            referencedRelation: "study_summaries"
+            referencedColumns: ["study_id"]
+          },
         ]
       }
       meme_tags: {
@@ -4595,6 +4602,13 @@ export type Database = {
             referencedRelation: "studies"
             referencedColumns: ["id"]
           },
+          {
+            foreignKeyName: "study_caption_mappings_study_id_fkey"
+            columns: ["study_id"]
+            isOneToOne: false
+            referencedRelation: "study_summaries"
+            referencedColumns: ["study_id"]
+          },
         ]
       }
       study_caption_navigation_events: {
@@ -4958,6 +4972,13 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "studies"
             referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "study_participations_study_id_fkey"
+            columns: ["study_id"]
+            isOneToOne: false
+            referencedRelation: "study_summaries"
+            referencedColumns: ["study_id"]
           },
         ]
       }
@@ -5446,6 +5467,19 @@ export type Database = {
           up: number | null
           voters: number | null
           votes_are_study_only: boolean | null
+        }
+        Relationships: []
+      }
+      study_summaries: {
+        Row: {
+          caption_count: number | null
+          captions_liked: number | null
+          captions_seen: number | null
+          last_activity_utc: string | null
+          study_id: number | null
+          viewer_count: number | null
+          vote_count: number | null
+          voter_count: number | null
         }
         Relationships: []
       }

@@ -16,6 +16,7 @@
 
 ## Repository Layout
 - `app/`: App Router pages and layout.
+- `app/page.tsx`: Dashboard. Featured card for the latest non-hidden study plus a grid of the next 9 (`components/dashboard-study-card.tsx`: dates, captions, participants, like rate, AI tagging status, quick links), a jump-to-study search over all studies (`components/study-jump-form.tsx`), a `?showHidden=1` toggle for `studies.is_hidden` test studies, and the More reports menu. Card numbers come from the `study_summaries` view (security-invoker; distinct participant×caption seen/liked with the same-session like rule).
 - `app/login/page.tsx`: Google-only login route (public).
 - `app/auth/callback/route.ts`: OAuth callback + `profiles.is_superadmin` gate.
 - `app/reports/study-comparison/page.tsx`: Protected report page that compares two studies (`?studyA=<id>&studyB=<id>`) using caption coverage, vote-derived metrics, overlap counts, and deltas in an on-page comparison table.
