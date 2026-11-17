@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useRef, useState, useTransition } from "react";
+import { useEffect, useRef, useState, useTransition } from "react";
 
 import { cancelRunAction, startRunAction, tagNextBatchAction } from "@/app/tagging/actions";
 
@@ -25,6 +25,8 @@ type RunNote = {
   unfit_notes: string | null;
   error_message: string | null;
   status: string;
+  image_url: string | null;
+  image_description: string | null;
 };
 
 type StudyOption = {
@@ -43,6 +45,19 @@ type TaggingRunProgressProps = {
   notes: RunNote[];
   /** Runs still in progress for other scopes. */
   otherRunningRuns: { id: number; study_id: number | null }[];
+  /** Latest run per scope, keyed by study id or `all`, for the picker's status labels. */
+  runStatusByScope: Record<string, { run_id: number; status: string }>;
+};
+
+const LEAVE_WARNING =
+  "A tagging run is in progress in this tab. Leaving pauses it after the current batch (you can resume later). Leave anyway?";
+
+/** Picker suffix such as "tagged (run #3)" or "not tagged". */
+const describeScopeStatus = (latest: { run_id: number; status: string } | undefined) => {
+  if (!latest) return "not tagged";
+  if (latest.status === "completed") return `tagged (run #${latest.run_id})`;
+  if (latest.status === "running") return `in progress (run #${latest.run_id})`;
+  return `${latest.status} (run #${latest.run_id})`;
 };
 
 const scopeLabel = (studyId: number | null) => (studyId === null ? "all studies" : `study #${studyId}`);
@@ -58,6 +73,7 @@ export function TaggingRunProgress({
   run,
   notes,
   otherRunningRuns,
+  runStatusByScope,
 }: TaggingRunProgressProps) {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
@@ -67,6 +83,37 @@ export function TaggingRunProgress({
   const stopRequested = useRef(false);
   const [scope, setScope] = useState<string>(initialStudyId === null ? "all" : initialStudyId.toString());
   const selectedStudyId = scope === "all" ? null : Number.parseInt(scope, 10);
+
+  // While a run loops in this tab, warn before closing/reloading the tab or following an in-app link.
+  useEffect(() => {
+    if (!isLooping) return;
+    const onBeforeUnload = (event: BeforeUnloadEvent) => {
+      event.preventDefault();
+      event.returnValue = "";
+    };
+    const onLinkClick = (event: MouseEvent) => {
+      const anchor = (event.target as Element | null)?.closest?.("a[href]");
+      if (!anchor || anchor.getAttribute("target") === "_blank") return;
+      if (!window.confirm(LEAVE_WARNING)) {
+        event.preventDefault();
+        event.stopPropagation();
+      }
+    };
+    window.addEventListener("beforeunload", onBeforeUnload);
+    document.addEventListener("click", onLinkClick, true);
+    return () => {
+      window.removeEventListener("beforeunload", onBeforeUnload);
+      document.removeEventListener("click", onLinkClick, true);
+    };
+  }, [isLooping]);
+
+  // If this panel goes away (navigation, scope change), stop the loop after its current batch.
+  useEffect(
+    () => () => {
+      stopRequested.current = true;
+    },
+    [],
+  );
 
   /** Switching scope reloads the page so the panel shows that scope's own latest run. */
   const changeScope = (value: string) => {
@@ -193,12 +240,12 @@ export function TaggingRunProgress({
             value={scope}
             onChange={(event) => changeScope(event.target.value)}
             disabled={isPending || isLooping}
-            className="app-input h-9 max-w-64 rounded-md px-2 text-sm outline-none"
+            className="app-input h-9 max-w-80 rounded-md px-2 text-sm outline-none"
           >
-            <option value="all">All studies</option>
+            <option value="all">All studies · {describeScopeStatus(runStatusByScope.all)}</option>
             {studies.map((study) => (
               <option key={study.id} value={study.id}>
-                #{study.id} {study.slug ?? ""}
+                #{study.id} {study.slug ?? ""} · {describeScopeStatus(runStatusByScope[study.id.toString()])}
               </option>
             ))}
           </select>
@@ -270,12 +317,31 @@ export function TaggingRunProgress({
           <summary className="cursor-pointer text-sm font-medium">Recent notes and errors ({notes.length})</summary>
           <ul className="mt-2 space-y-2">
             {notes.map((note) => (
-              <li key={note.image_id} className="rounded-lg border border-[var(--card-border)] p-2 text-sm">
-                <code className="app-muted text-xs">{note.image_id}</code>
-                {note.error_message ? (
-                  <p className="text-red-600 dark:text-red-400">Error: {note.error_message}</p>
-                ) : null}
-                {note.unfit_notes ? <p className="app-muted">No good fit: {note.unfit_notes}</p> : null}
+              <li
+                key={note.image_id}
+                className="flex gap-3 rounded-lg border border-[var(--card-border)] p-2 text-sm"
+              >
+                <div className="flex h-24 w-32 shrink-0 items-center justify-center rounded-md bg-white/40 dark:bg-slate-950/20">
+                  {note.image_url ? (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img
+                      src={note.image_url}
+                      alt={note.image_description ?? "Study image"}
+                      loading="lazy"
+                      decoding="async"
+                      className="max-h-full max-w-full object-contain"
+                    />
+                  ) : (
+                    <span className="app-muted text-xs">No image</span>
+                  )}
+                </div>
+                <div className="min-w-0 flex-1 space-y-1">
+                  {note.error_message ? (
+                    <p className="text-red-600 dark:text-red-400">Error: {note.error_message}</p>
+                  ) : null}
+                  {note.unfit_notes ? <p className="app-muted">No good fit: {note.unfit_notes}</p> : null}
+                  <code className="app-muted block break-all text-xs">{note.image_id}</code>
+                </div>
               </li>
             ))}
           </ul>

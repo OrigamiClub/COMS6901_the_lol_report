@@ -280,11 +280,32 @@ export const getCommonUseCategoryNames = async (supabase: Client): Promise<strin
 export const listUnfitNotes = async (supabase: Client, runId: number, limit = 25) => {
   const { data, error } = await supabase
     .from("meme_tagging_run_items")
-    .select("image_id, unfit_notes, error_message, status")
+    .select("image_id, unfit_notes, error_message, status, images(url, image_description)")
     .eq("run_id", runId)
     .or("unfit_notes.not.is.null,status.eq.error")
     .order("modified_datetime_utc", { ascending: false })
     .limit(limit);
   if (error) fail("Unable to load run notes", error);
-  return data ?? [];
+  return (data ?? []).map(({ images, ...note }) => ({
+    ...note,
+    image_url: images?.url ?? null,
+    image_description: images?.image_description ?? null,
+  }));
+};
+
+export type StudyRunStatus = { run_id: number; status: string };
+
+/** Latest run per scope: keyed by study id, with `all` for runs over every study. */
+export const getLatestRunStatusByScope = async (supabase: Client) => {
+  const { data, error } = await supabase
+    .from("meme_tagging_runs")
+    .select("id, study_id, status")
+    .order("id", { ascending: false });
+  if (error) fail("Unable to load tagging runs", error);
+  const byScope: Record<string, StudyRunStatus> = {};
+  for (const run of data ?? []) {
+    const key = run.study_id === null ? "all" : run.study_id.toString();
+    byScope[key] ??= { run_id: run.id, status: run.status };
+  }
+  return byScope;
 };

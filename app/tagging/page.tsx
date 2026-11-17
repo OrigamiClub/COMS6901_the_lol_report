@@ -6,6 +6,7 @@ import { TaggingTaxonomyEditor } from "@/components/tagging-taxonomy-editor";
 import { getMemeTaggingModelName, isGeminiConfigured } from "@/utils/meme-tagging/gemini";
 import {
   getLatestRun,
+  getLatestRunStatusByScope,
   getRunProgress,
   listMemeTags,
   listRunningRuns,
@@ -24,10 +25,11 @@ export default async function TaggingPage({ searchParams }: TaggingPageProps) {
   const { studyId: rawStudyId } = await searchParams;
   const requestedStudyId = Number.parseInt(Array.isArray(rawStudyId) ? (rawStudyId[0] ?? "") : (rawStudyId ?? ""), 10);
   const supabase = await createClient();
-  const [tags, studiesResult, runningRuns] = await Promise.all([
+  const [tags, studiesResult, runningRuns, runStatusByScope] = await Promise.all([
     listMemeTags(supabase),
     supabase.from("studies").select("id, slug").order("id", { ascending: false }),
     listRunningRuns(supabase),
+    getLatestRunStatusByScope(supabase),
   ]);
   if (studiesResult.error) throw new Error(`Unable to load studies: ${studiesResult.error.message}`);
   const studies = studiesResult.data ?? [];
@@ -92,6 +94,7 @@ export default async function TaggingPage({ searchParams }: TaggingPageProps) {
 
         <TaggingRunProgress
           key={initialStudyId ?? "all"}
+          runStatusByScope={runStatusByScope}
           otherRunningRuns={otherRunningRuns.map(({ id, study_id }) => ({ id, study_id }))}
           aiEnabled={geminiConfigured}
           canStart={activeCounts.subject > 0 && activeCounts.humor_style > 0}
