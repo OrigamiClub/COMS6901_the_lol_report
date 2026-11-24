@@ -21,7 +21,13 @@ export type LikeGraphData = {
   /** [node index, node index, captions both liked]. */
   edges: [number, number, number][];
   /** Captions liked by at least one participant; `liked_captions` indexes into this. */
-  captions: { caption_id: string; text: string; style: string | null }[];
+  captions: {
+    caption_id: string;
+    text: string;
+    image_url: string | null;
+    image_description: string | null;
+    style: string | null;
+  }[];
 };
 
 type LayoutNode = SimulationNodeDatum & { index: number };
@@ -53,6 +59,10 @@ const GROUP_COLOR_COUNT = 8;
 const TOP_GROUP_CAPTIONS = 3;
 /** A caption must be liked by at least this share of a group to count as a group favorite. */
 const MIN_GROUP_LIKE_SHARE = 0.3;
+/** A group is named after a humor style only if that style's share of its likes is at least this much above everyone's. */
+const MIN_STYLE_LIFT_FOR_NAME = 0.03;
+/** Graph labels shorten style names past this length so neighboring labels don't collide. */
+const MAX_LABEL_STYLE_CHARS = 16;
 const LAYOUT_TICKS = 300;
 const PADDING = 24;
 const TOP_PARTNERS = 5;
@@ -82,6 +92,30 @@ const groupColor = (group: number | undefined) =>
     : `var(--graph-group-other, ${OTHER_GROUP_FALLBACK})`;
 
 const formatPercent = (value: number) => `${Math.round(value * 100)}%`;
+
+const truncate = (text: string, max: number) => (text.length > max ? `${text.slice(0, max - 1).trimEnd()}…` : text);
+
+/**
+ * How much more alike a group's members are with each other than with everyone else shown,
+ * as average pairwise similarity inside ÷ average similarity to outsiders.
+ */
+type GroupStrength = { within: number; across: number; ratio: number | null; level: "tight" | "moderate" | "loose" };
+
+/**
+ * Cutoffs calibrated on study 122, where groups ranged from 1.16× to 1.90×. A random set of people
+ * scores about 1×, and Louvain always finds some grouping, so groups near 1× may be mostly chance.
+ */
+const TIGHT_RATIO = 1.5;
+const LOOSE_RATIO = 1.25;
+
+const strengthLevel = (ratio: number | null): GroupStrength["level"] =>
+  ratio === null || ratio >= TIGHT_RATIO ? "tight" : ratio >= LOOSE_RATIO ? "moderate" : "loose";
+
+const STRENGTH_TEXT: Record<GroupStrength["level"], string> = {
+  tight: "Tight group",
+  moderate: "Moderate group",
+  loose: "Loose group: treat with caution",
+};
 const formatPoints = (value: number) => `${value >= 0 ? "+" : "−"}${Math.abs(Math.round(value * 100))} pts`;
 
 /** Dot radius grows with the square root of the value, so area tracks it. */
@@ -189,6 +223,27 @@ export function LikeOverlapGraph({ data }: { data: LikeGraphData }) {
     const overallStyle = styleShare(graph.nodeIndexes);
     const styleNames = [...new Set(data.captions.flatMap((caption) => (caption.style ? [caption.style] : [])))];
 
+    // Similarity for every pair shown (pairs with no shared likes are absent, i.e. 0).
+    const shown = new Set(graph.nodeIndexes);
+    const pairSimilarity = pairs.filter((pair) => shown.has(pair.a) && shown.has(pair.b));
+    const strengthOf = (people: number[]): GroupStrength => {
+      const inGroup = new Set(people);
+      let withinSum = 0;
+      let acrossSum = 0;
+      for (const pair of pairSimilarity) {
+        const aIn = inGroup.has(pair.a);
+        const bIn = inGroup.has(pair.b);
+        if (aIn && bIn) withinSum += pair.similarity;
+        else if (aIn !== bIn) acrossSum += pair.similarity;
+      }
+      const n = people.length;
+      const outsiders = shown.size - n;
+      const within = n > 1 ? withinSum / ((n * (n - 1)) / 2) : 0;
+      const across = outsiders > 0 ? acrossSum / (n * outsiders) : 0;
+      const ratio = across > 0 ? within / across : null;
+      return { within, across, ratio, level: strengthLevel(ratio) };
+    };
+
     const summaries = [...members.entries()]
       .filter(([, people]) => people.length >= MIN_GROUP_SIZE)
       .sort((a, b) => a[0] - b[0])
@@ -203,17 +258,20 @@ export function LikeOverlapGraph({ data }: { data: LikeGraphData }) {
         const style = styleNames
           .map((name) => ({ name, lift: groupStyle(name) - overallStyle(name) }))
           .sort((x, y) => y.lift - x.lift)[0];
+        const leaning = style && style.lift >= MIN_STYLE_LIFT_FOR_NAME ? style : null;
         return {
           group,
           people,
           averageLikes: people.reduce((sum, person) => sum + (data.nodes[person]?.liked ?? 0), 0) / people.length,
           favorites,
-          style: style && style.lift > 0 ? style : null,
+          style: leaning,
+          strength: strengthOf(people),
         };
       });
     const inSmallGroups = [...members.values()].filter((people) => people.length < MIN_GROUP_SIZE).flat().length;
-    return { summaries, inSmallGroups };
-  }, [graph, data.nodes, data.captions]);
+    const styleByGroup = new Map(summaries.map((summary) => [summary.group, summary.style?.name ?? null]));
+    return { summaries, inSmallGroups, styleByGroup };
+  }, [graph, pairs, data.nodes, data.captions]);
 
   const radiusOf = (node: number) =>
     mode === "shared"
@@ -288,7 +346,8 @@ export function LikeOverlapGraph({ data }: { data: LikeGraphData }) {
           if (members.length < MIN_GROUP_SIZE) return [];
           const xs = members.map((node) => node.x ?? 0);
           const top = Math.min(...members.map((node) => (node.y ?? 0) - radius(node.index)));
-          return [{ group, x: (Math.min(...xs) + Math.max(...xs)) / 2, y: top - 8 }];
+          // Two lines (number, then humor style) sit above the group's topmost dot.
+          return [{ group, x: (Math.min(...xs) + Math.max(...xs)) / 2, y: top - 21 }];
         })
       : [];
 
@@ -304,7 +363,12 @@ export function LikeOverlapGraph({ data }: { data: LikeGraphData }) {
   const edgeWidth = (value: number) =>
     layout.high === layout.low ? 2 : 0.6 + 4.4 * ((value - layout.low) / (layout.high - layout.low));
   const describePair = (pair: Pair) => `${pair.shared} shared, ${formatPercent(pair.similarity)} similar`;
-  const groupLabel = (group: number | undefined) => (group === undefined ? "no group" : `Group ${group + 1}`);
+  /** "Group 2 · Wordplay" when the group leans toward a style, else "Group 2". */
+  const groupLabel = (group: number | undefined) => {
+    if (group === undefined) return "no group";
+    const style = groups.styleByGroup.get(group);
+    return style ? `Group ${group + 1} · ${style}` : `Group ${group + 1}`;
+  };
   const isDimmed = (node: number) =>
     selectedGroup !== null ? graph.groupOf.get(node) !== selectedGroup : focus !== null && focus !== node;
 
@@ -510,7 +574,12 @@ export function LikeOverlapGraph({ data }: { data: LikeGraphData }) {
                 }}
                 className="pointer-events-none select-none"
               >
-                Group {label.group + 1}
+                <tspan x={label.x}>Group {label.group + 1}</tspan>
+                {groups.styleByGroup.get(label.group) ? (
+                  <tspan x={label.x} dy={13} fontSize={10} fontWeight={500}>
+                    {truncate(groups.styleByGroup.get(label.group) as string, MAX_LABEL_STYLE_CHARS)}
+                  </tspan>
+                ) : null}
               </text>
             ))}
           </g>
@@ -547,6 +616,10 @@ export function LikeOverlapGraph({ data }: { data: LikeGraphData }) {
           Found automatically from the lines above (Louvain clustering), largest first. The eight largest get their own color; any
           beyond that are gray. Favorites are captions liked by at least {formatPercent(MIN_GROUP_LIKE_SHARE)} of
           the group, ranked by how much more the group liked them than everyone shown (group % vs everyone %).
+          Each group is named after the humor style it over-likes most, if one stands out by at least{" "}
+          {Math.round(MIN_STYLE_LIFT_FOR_NAME * 100)} pts. Strength compares average similarity inside the group with
+          similarity to everyone else (a random set of people scores about 1×): tight is {TIGHT_RATIO}× or more, loose
+          is under {LOOSE_RATIO}×, where the grouping may be mostly chance.
         </p>
         <ul className="grid gap-2 md:grid-cols-2">
           {groups.summaries.map((summary) => {
@@ -570,24 +643,46 @@ export function LikeOverlapGraph({ data }: { data: LikeGraphData }) {
                       className="inline-block h-3 w-3 rounded-full"
                       style={{ background: groupColor(summary.group) }}
                     />
-                    Group {summary.group + 1}
-                    <span className="app-muted font-normal">
-                      · {summary.people.length} people · {summary.averageLikes.toFixed(1)} likes on average
-                    </span>
+                    {groupLabel(summary.group)}
+                  </span>
+                  <span className="app-muted block text-xs">
+                    {summary.people.length} people · {summary.averageLikes.toFixed(1)} likes on average
                   </span>
                   {summary.style ? (
                     <span className="block">
                       Leans toward <strong>{summary.style.name}</strong>{" "}
                       <span className="app-muted">({formatPoints(summary.style.lift)} share of their likes)</span>
                     </span>
-                  ) : null}
+                  ) : (
+                    <span className="app-muted block">No humor style stands out for this group.</span>
+                  )}
+                  <span
+                    className={`block text-xs ${summary.strength.level === "loose" ? "text-amber-700 dark:text-amber-400" : "app-muted"}`}
+                  >
+                    <strong className="font-semibold">{STRENGTH_TEXT[summary.strength.level]}</strong>
+                    {summary.strength.ratio !== null
+                      ? ` · members are ${summary.strength.ratio.toFixed(1)}× as alike with each other as with everyone else (${formatPercent(summary.strength.within)} vs ${formatPercent(summary.strength.across)} average similarity)`
+                      : " · no overlap with anyone outside the group"}
+                  </span>
                   {summary.favorites.length > 0 ? (
-                    <span className="block space-y-0.5">
+                    <span className="grid grid-cols-2 items-start gap-2 pt-1 sm:grid-cols-3">
                       {summary.favorites.map((favorite) => (
-                        <span key={favorite.caption.caption_id} className="block">
-                          “{favorite.caption.text}”{" "}
-                          <span className="app-muted whitespace-nowrap tabular-nums">
-                            {formatPercent(favorite.group)} vs {formatPercent(favorite.overall)}
+                        <span key={favorite.caption.caption_id} className="block min-w-0">
+                          {favorite.caption.image_url ? (
+                            <span className="flex h-28 items-center justify-center rounded-md bg-white/40 p-1 dark:bg-slate-950/20">
+                              {/* eslint-disable-next-line @next/next/no-img-element */}
+                              <img
+                                src={favorite.caption.image_url}
+                                alt={favorite.caption.image_description ?? favorite.caption.text}
+                                loading="lazy"
+                                decoding="async"
+                                className="max-h-full max-w-full object-contain"
+                              />
+                            </span>
+                          ) : null}
+                          <span className="block text-xs leading-snug break-words">{favorite.caption.text}</span>
+                          <span className="app-muted mt-0.5 block text-xs tabular-nums">
+                            {formatPercent(favorite.group)} of group vs {formatPercent(favorite.overall)} of everyone
                           </span>
                         </span>
                       ))}

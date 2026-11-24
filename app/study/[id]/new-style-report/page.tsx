@@ -803,9 +803,13 @@ const buildNewStyleReport = ({
       .sort((a, b) => a - b);
     if (likers.length > 0) {
       const captionIndex = graphCaptions.length;
+      const captionSummary = captionsById.get(caption.caption_id);
+      const image = captionSummary ? imagesById.get(captionSummary.image_id) : undefined;
       graphCaptions.push({
         caption_id: caption.caption_id,
-        text: getCaptionPreview(caption.caption_id, captionsById.get(caption.caption_id)),
+        text: getCaptionPreview(caption.caption_id, captionSummary),
+        image_url: image?.url ?? null,
+        image_description: image?.image_description ?? null,
         style: null,
       });
       for (const liker of likers) graphNodes[liker]?.liked_captions.push(captionIndex);
