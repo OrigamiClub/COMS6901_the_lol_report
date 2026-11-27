@@ -35,6 +35,8 @@ type HumorTagHeatmapProps = {
   /** "liked" or "upvoted". */
   hitLabel: string;
   studyRate: number;
+  /** What `studyRate` is the average of, e.g. "study" (default) or "group". */
+  baselineLabel?: string;
   minSample: number;
   /** Memes per cell, keyed `${humorStyleTagId}|${subjectTagId}`; enables click-to-show. */
   memesByCell?: Record<string, HeatmapMeme[]>;
@@ -91,6 +93,7 @@ export function HumorTagHeatmap({
   sampleLabel,
   hitLabel,
   studyRate,
+  baselineLabel = "study",
   minSample,
   memesByCell,
 }: HumorTagHeatmapProps) {
@@ -113,7 +116,7 @@ export function HumorTagHeatmap({
   const describe = (cell: HeatmapCell) =>
     cell.sample === 0
       ? `${cell.captions} caption(s), no ${sampleLabel} yet`
-      : `${formatPercent(rate(cell))} ${metricLabel.toLowerCase()} (${cell.hits.toLocaleString()} ${hitLabel} of ${cell.sample.toLocaleString()} ${sampleLabel}, ${formatDelta(rate(cell) - studyRate)} vs. study) · ${cell.captions} caption(s)`;
+      : `${formatPercent(rate(cell))} ${metricLabel.toLowerCase()} (${cell.hits.toLocaleString()} ${hitLabel} of ${cell.sample.toLocaleString()} ${sampleLabel}, ${formatDelta(rate(cell) - studyRate)} vs. ${baselineLabel}) · ${cell.captions} caption(s)`;
 
   if (humorStyles.length === 0 || subjects.length === 0) {
     return <p className="app-muted text-sm">No captions have both a humor-style and a subject tag yet.</p>;
@@ -246,7 +249,9 @@ export function HumorTagHeatmap({
           Fewer than {minSample} {sampleLabel} (not colored)
         </span>
         <span>· = no captions with this pair</span>
-        <span>Study average {formatPercent(studyRate)}</span>
+        <span>
+          {baselineLabel.charAt(0).toUpperCase() + baselineLabel.slice(1)} average {formatPercent(studyRate)}
+        </span>
       </div>
 
       {selectedKey && memesByCell ? (

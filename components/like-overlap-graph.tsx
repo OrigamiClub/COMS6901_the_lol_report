@@ -13,22 +13,33 @@ import {
   type SimulationNodeDatum,
 } from "d3-force";
 
+import {
+  HumorTagHeatmap,
+  type HeatmapCell,
+  type HeatmapMeme,
+  type HeatmapTag,
+} from "@/components/humor-tag-heatmap";
 import { louvain } from "@/utils/like-graph/louvain";
 
 export type LikeGraphData = {
   /** Participants who liked at least one caption. */
-  nodes: { label: string; liked: number; seen: number; liked_captions: number[] }[];
+  nodes: { label: string; liked: number; seen: number; liked_captions: number[]; seen_captions: number[] }[];
   /** [node index, node index, captions both liked]. */
   edges: [number, number, number][];
-  /** Captions liked by at least one participant; `liked_captions` indexes into this. */
+  /** Captions seen by at least one participant; `liked_captions` and `seen_captions` index into this. */
   captions: {
     caption_id: string;
     text: string;
     image_url: string | null;
     image_description: string | null;
     style: string | null;
+    style_tag_id: number | null;
+    subject_tag_id: number | null;
   }[];
 };
+
+/** Row and column order of the study heatmap, reused for the per-group heatmap. */
+export type LikeGraphHeatmapAxes = { humorStyles: HeatmapTag[]; subjects: HeatmapTag[] };
 
 type LayoutNode = SimulationNodeDatum & { index: number };
 type LayoutLink = SimulationLinkDatum<LayoutNode> & { value: number };
@@ -63,6 +74,21 @@ const MIN_GROUP_LIKE_SHARE = 0.3;
 const MIN_STYLE_LIFT_FOR_NAME = 0.03;
 /** Graph labels shorten style names past this length so neighboring labels don't collide. */
 const MAX_LABEL_STYLE_CHARS = 16;
+/** A group's rate for a caption is only compared when at least this many members saw it. */
+const MIN_VIEWERS_TO_COMPARE = 5;
+const DISAGREEMENT_COUNT = 5;
+/** Only list captions where the most and least enthusiastic groups differ by at least this much. */
+const MIN_DISAGREEMENT_GAP = 0.3;
+/** Group heatmap cells seen by fewer members than this are drawn dashed and left out of the color scale. */
+const GROUP_HEATMAP_MIN_VIEWERS = 5;
+/**
+ * Fit = average similarity to the rest of one's group ÷ to the next-closest group. Groups come from each
+ * person's few closest matches, so someone can be closer on average to another group. On study 122 at the
+ * defaults these cutoffs split people about 75 fit / 48 between / 47 closer to another group.
+ */
+const FIT_RATIO = 1.1;
+const BETWEEN_RATIO = 0.9;
+const PERSON_MATCHES = 3;
 const LAYOUT_TICKS = 300;
 const PADDING = 24;
 const TOP_PARTNERS = 5;
@@ -121,7 +147,19 @@ const formatPoints = (value: number) => `${value >= 0 ? "+" : "−"}${Math.abs(M
 /** Dot radius grows with the square root of the value, so area tracks it. */
 const radiusFor = (value: number, max: number) => 3 + 6 * Math.sqrt(value / Math.max(max, 1));
 
-export function LikeOverlapGraph({ data }: { data: LikeGraphData }) {
+/** Likers and viewers of one caption among a set of people. */
+const countAmong = (members: Set<number>, likers: number[], viewers: number[]) => ({
+  likers: likers.filter((person) => members.has(person)).length,
+  viewers: viewers.filter((person) => members.has(person)).length,
+});
+
+export function LikeOverlapGraph({
+  data,
+  heatmapAxes = null,
+}: {
+  data: LikeGraphData;
+  heatmapAxes?: LikeGraphHeatmapAxes | null;
+}) {
   const maxLiked = Math.max(1, ...data.nodes.map((node) => node.liked));
   const [mode, setMode] = useState<EdgeMode>("similarity");
   const [neighbors, setNeighbors] = useState(DEFAULT_NEIGHBORS);
@@ -140,6 +178,24 @@ export function LikeOverlapGraph({ data }: { data: LikeGraphData }) {
       }),
     [data.edges, data.nodes],
   );
+
+  /** For each caption, who liked it and who saw it (node indexes). */
+  const audience = useMemo(() => {
+    const likers: number[][] = data.captions.map(() => []);
+    const viewers: number[][] = data.captions.map(() => []);
+    data.nodes.forEach((node, person) => {
+      for (const caption of node.liked_captions) likers[caption]?.push(person);
+      for (const caption of node.seen_captions) viewers[caption]?.push(person);
+    });
+    return { likers, viewers };
+  }, [data.nodes, data.captions]);
+
+  const similarityBetween = useMemo(() => {
+    const lookup = new Map<number, number>();
+    const size = data.nodes.length;
+    for (const pair of pairs) lookup.set(Math.min(pair.a, pair.b) * size + Math.max(pair.a, pair.b), pair.similarity);
+    return (a: number, b: number) => lookup.get(Math.min(a, b) * size + Math.max(a, b)) ?? 0;
+  }, [pairs, data.nodes.length]);
 
   const graph = useMemo(() => {
     const metric = (pair: Pair) => (mode === "shared" ? pair.shared : pair.similarity);
@@ -270,8 +326,120 @@ export function LikeOverlapGraph({ data }: { data: LikeGraphData }) {
       });
     const inSmallGroups = [...members.values()].filter((people) => people.length < MIN_GROUP_SIZE).flat().length;
     const styleByGroup = new Map(summaries.map((summary) => [summary.group, summary.style?.name ?? null]));
-    return { summaries, inSmallGroups, styleByGroup };
+    return { summaries, inSmallGroups, styleByGroup, members };
   }, [graph, pairs, data.nodes, data.captions]);
+
+  /** Captions the summarized groups disagree on most: highest vs lowest like rate among members who saw it. */
+  const disagreements = useMemo(() => {
+    const memberSets = groups.summaries.map((summary) => ({ group: summary.group, members: new Set(summary.people) }));
+    if (memberSets.length < 2) return [];
+    const everyone = new Set(graph.nodeIndexes);
+    return data.captions
+      .flatMap((caption, index) => {
+        const likers = audience.likers[index] ?? [];
+        const viewers = audience.viewers[index] ?? [];
+        const rates = memberSets
+          .map(({ group, members }) => ({ group, ...countAmong(members, likers, viewers) }))
+          .filter((row) => row.viewers >= MIN_VIEWERS_TO_COMPARE)
+          .map((row) => ({ ...row, rate: row.likers / row.viewers }));
+        if (rates.length < 2) return [];
+        rates.sort((x, y) => y.rate - x.rate || y.viewers - x.viewers);
+        const high = rates[0] as (typeof rates)[number];
+        const low = rates[rates.length - 1] as (typeof rates)[number];
+        const overall = countAmong(everyone, likers, viewers);
+        return [{ caption, high, low, gap: high.rate - low.rate, overall }];
+      })
+      .filter((row) => row.gap >= MIN_DISAGREEMENT_GAP)
+      .sort((x, y) => y.gap - x.gap)
+      .slice(0, DISAGREEMENT_COUNT);
+  }, [groups.summaries, graph.nodeIndexes, data.captions, audience]);
+
+  /** The study heatmap recomputed from the selected group's views and likes only. */
+  const groupHeatmap = useMemo(() => {
+    if (!heatmapAxes || selectedGroup === null) return null;
+    const members = new Set(groups.members.get(selectedGroup) ?? []);
+    const cells = new Map<string, HeatmapCell>();
+    const memesByCell: Record<string, HeatmapMeme[]> = {};
+    let hits = 0;
+    let sample = 0;
+    data.captions.forEach((caption, index) => {
+      if (caption.style_tag_id === null || caption.subject_tag_id === null) return;
+      const counts = countAmong(members, audience.likers[index] ?? [], audience.viewers[index] ?? []);
+      if (counts.viewers === 0) return;
+      const key = `${caption.style_tag_id}|${caption.subject_tag_id}`;
+      const cell = cells.get(key) ?? {
+        humor_style_tag_id: caption.style_tag_id,
+        subject_tag_id: caption.subject_tag_id,
+        captions: 0,
+        sample: 0,
+        hits: 0,
+      };
+      cell.captions += 1;
+      cell.sample += counts.viewers;
+      cell.hits += counts.likers;
+      cells.set(key, cell);
+      (memesByCell[key] ??= []).push({
+        id: `${caption.caption_id}-${index}`,
+        caption_text: caption.text,
+        image_url: caption.image_url,
+        image_description: caption.image_description,
+        sample: counts.viewers,
+        hits: counts.likers,
+      });
+      hits += counts.likers;
+      sample += counts.viewers;
+    });
+    const usedStyles = new Set([...cells.values()].map((cell) => cell.humor_style_tag_id));
+    const usedSubjects = new Set([...cells.values()].map((cell) => cell.subject_tag_id));
+    return {
+      humorStyles: heatmapAxes.humorStyles.filter((tag) => usedStyles.has(tag.id)),
+      subjects: heatmapAxes.subjects.filter((tag) => usedSubjects.has(tag.id)),
+      cells: [...cells.values()],
+      memesByCell,
+      rate: sample > 0 ? hits / sample : 0,
+    };
+  }, [heatmapAxes, selectedGroup, groups.members, data.captions, audience]);
+
+  /** Details for the clicked participant: closest matches, how well they fit their group, and their main style. */
+  const person = useMemo(() => {
+    if (pinned === null || !graph.groupOf.has(pinned)) return null;
+    const own = graph.groupOf.get(pinned) as number;
+    const averageTo = (people: number[]) => {
+      const others = people.filter((other) => other !== pinned);
+      return others.length > 0 ? others.reduce((sum, other) => sum + similarityBetween(pinned, other), 0) / others.length : 0;
+    };
+    const ownAverage = averageTo(groups.members.get(own) ?? []);
+    const nextClosest = [...groups.members.entries()]
+      .filter(([group, people]) => group !== own && people.length >= MIN_GROUP_SIZE)
+      .map(([group, people]) => ({ group, average: averageTo(people) }))
+      .sort((x, y) => y.average - x.average)[0];
+    const styleCounts = new Map<string, number>();
+    let tagged = 0;
+    for (const caption of data.nodes[pinned]?.liked_captions ?? []) {
+      const style = data.captions[caption]?.style;
+      if (!style) continue;
+      styleCounts.set(style, (styleCounts.get(style) ?? 0) + 1);
+      tagged += 1;
+    }
+    const topStyle = [...styleCounts.entries()].sort((x, y) => y[1] - x[1])[0];
+    return {
+      index: pinned,
+      own,
+      ownAverage,
+      nextClosest: nextClosest ?? null,
+      fit:
+        !nextClosest || ownAverage >= FIT_RATIO * nextClosest.average
+          ? ("fits" as const)
+          : ownAverage >= BETWEEN_RATIO * nextClosest.average
+            ? ("between" as const)
+            : ("closer-elsewhere" as const),
+      topStyle: topStyle && tagged > 0 ? { name: topStyle[0], share: topStyle[1] / tagged } : null,
+      matches: (graph.partners.get(pinned) ?? []).slice(0, PERSON_MATCHES).map((pair) => ({
+        other: pair.a === pinned ? pair.b : pair.a,
+        pair,
+      })),
+    };
+  }, [pinned, graph, groups.members, similarityBetween, data.nodes, data.captions]);
 
   const radiusOf = (node: number) =>
     mode === "shared"
@@ -373,8 +541,8 @@ export function LikeOverlapGraph({ data }: { data: LikeGraphData }) {
     selectedGroup !== null ? graph.groupOf.get(node) !== selectedGroup : focus !== null && focus !== node;
 
   const topPairs = [...graph.edges].sort((x, y) => y.value - x.value || y.shared - x.shared).slice(0, TOP_PAIRS);
-  const focusNode = focus === null ? null : data.nodes[focus];
-  const focusPartners = focus === null ? [] : (graph.partners.get(focus) ?? []).slice(0, TOP_PARTNERS);
+  const hoverNode = hovered === null ? null : data.nodes[hovered];
+  const hoverPartners = hovered === null ? [] : (graph.partners.get(hovered) ?? []).slice(0, TOP_PARTNERS);
   const modeOption = MODE_OPTIONS.find((option) => option.value === mode);
   const hiddenForLikes = data.nodes.length - graph.eligibleCount;
 
@@ -587,28 +755,110 @@ export function LikeOverlapGraph({ data }: { data: LikeGraphData }) {
       </div>
 
       <p className="min-h-5 text-sm" aria-live="polite">
-        {focusNode && focus !== null ? (
+        {hoverNode && hovered !== null ? (
           <>
-            <strong>{focusNode.label}</strong> ({groupLabel(graph.groupOf.get(focus))}): liked {focusNode.liked} of{" "}
-            {focusNode.seen} captions seen.
-            {focusPartners.length > 0 ? (
+            <strong>{hoverNode.label}</strong> ({groupLabel(graph.groupOf.get(hovered))}): liked {hoverNode.liked} of{" "}
+            {hoverNode.seen} captions seen.
+            {hoverPartners.length > 0 ? (
               <>
                 {" "}
                 Closest matches:{" "}
-                {focusPartners
-                  .map((pair) => `${data.nodes[pair.a === focus ? pair.b : pair.a]?.label ?? "?"} (${describePair(pair)})`)
+                {hoverPartners
+                  .map((pair) => `${data.nodes[pair.a === hovered ? pair.b : pair.a]?.label ?? "?"} (${describePair(pair)})`)
                   .join(", ")}
                 .
               </>
             ) : null}
-            {pinned === focus ? <span className="app-muted"> Click the dot again or the background to unpin.</span> : null}
           </>
         ) : (
           <span className="app-muted">
-            Hover over a participant for details; click to pin. Click a group below to highlight it.
+            Hover over a participant for a quick look; click for details. Click a group below to highlight it and see
+            its heatmap.
           </span>
         )}
       </p>
+
+      {person ? (
+        <section className="app-card space-y-2 rounded-xl p-4 text-sm" aria-label={`Details for ${data.nodes[person.index]?.label}`}>
+          <div className="flex flex-wrap items-start justify-between gap-2">
+            <div>
+              <h3 className="text-base font-semibold">{data.nodes[person.index]?.label}</h3>
+              <p className="flex flex-wrap items-center gap-2">
+                <span
+                  aria-hidden="true"
+                  className="inline-block h-3 w-3 rounded-full"
+                  style={{ background: groupColor(person.own) }}
+                />
+                {groupLabel(person.own)}
+                <span className="app-muted">
+                  · liked {data.nodes[person.index]?.liked} of {data.nodes[person.index]?.seen} captions seen
+                </span>
+              </p>
+            </div>
+            <button type="button" onClick={() => setPinned(null)} className="app-button rounded-md px-3 py-1 text-sm">
+              Close
+            </button>
+          </div>
+          <p>
+            {person.nextClosest === null ? (
+              <>Average similarity to the rest of the group: {formatPercent(person.ownAverage)}.</>
+            ) : person.fit === "fits" ? (
+              <>
+                <strong>Fits the group:</strong> {formatPercent(person.ownAverage)} average similarity to the rest of{" "}
+                {groupLabel(person.own)}, vs {formatPercent(person.nextClosest.average)} to the next closest,{" "}
+                {groupLabel(person.nextClosest.group)}.
+              </>
+            ) : person.fit === "between" ? (
+              <>
+                <strong>Between groups:</strong> about as close to {groupLabel(person.nextClosest.group)} (
+                {formatPercent(person.nextClosest.average)} average similarity) as to the rest of their own group (
+                {formatPercent(person.ownAverage)}).
+              </>
+            ) : (
+              <>
+                <strong>Closer on average to {groupLabel(person.nextClosest.group)}</strong> (
+                {formatPercent(person.nextClosest.average)} vs {formatPercent(person.ownAverage)} with their own group).
+                They were placed by their few closest matches, which sit in {groupLabel(person.own)}.
+              </>
+            )}
+            {person.topStyle ? (
+              <>
+                {" "}
+                Most of their likes are <strong>{person.topStyle.name}</strong> ({formatPercent(person.topStyle.share)}
+                ).
+              </>
+            ) : null}
+          </p>
+          {person.matches.length > 0 ? (
+            <div className="space-y-1">
+              <p className="app-muted text-xs">Closest matches (click to switch):</p>
+              <ul className="flex flex-wrap gap-2">
+                {person.matches.map(({ other, pair }) => (
+                  <li key={other}>
+                    <button
+                      type="button"
+                      onClick={() => setPinned(other)}
+                      className="app-button flex items-center gap-2 rounded-md px-3 py-1 text-left text-xs"
+                    >
+                      <span
+                        aria-hidden="true"
+                        className="inline-block h-2.5 w-2.5 rounded-full"
+                        style={{ background: groupColor(graph.groupOf.get(other)) }}
+                      />
+                      <span>
+                        <span className="font-medium">{data.nodes[other]?.label}</span>{" "}
+                        <span className="app-muted">
+                          {groupLabel(graph.groupOf.get(other))} · {describePair(pair)}
+                        </span>
+                      </span>
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ) : null}
+        </section>
+      ) : null}
 
       <section className="space-y-2">
         <h3 className="text-base font-semibold">Groups</h3>
@@ -701,6 +951,81 @@ export function LikeOverlapGraph({ data }: { data: LikeGraphData }) {
           </p>
         ) : null}
       </section>
+
+      {groupHeatmap && selectedGroup !== null ? (
+        <section className="space-y-2" aria-label={`Heatmap for ${groupLabel(selectedGroup)}`}>
+          <h3 className="text-base font-semibold">What {groupLabel(selectedGroup)} likes, by humor style × subject</h3>
+          <p className="app-muted text-xs">
+            The study heatmap above, using only this group&apos;s {groups.members.get(selectedGroup)?.length ?? 0}{" "}
+            members: rate = members who liked ÷ members who saw. Compared with the group&apos;s own average; cells seen
+            by fewer than {GROUP_HEATMAP_MIN_VIEWERS} members are dashed.
+          </p>
+          <HumorTagHeatmap
+            key={selectedGroup}
+            humorStyles={groupHeatmap.humorStyles}
+            subjects={groupHeatmap.subjects}
+            cells={groupHeatmap.cells}
+            metricLabel="Like rate"
+            sampleLabel="members who saw"
+            hitLabel="liked"
+            studyRate={groupHeatmap.rate}
+            baselineLabel="group"
+            minSample={GROUP_HEATMAP_MIN_VIEWERS}
+            memesByCell={groupHeatmap.memesByCell}
+          />
+        </section>
+      ) : null}
+
+      {disagreements.length > 0 ? (
+        <section className="space-y-2">
+          <h3 className="text-base font-semibold">Where groups disagree</h3>
+          <p className="app-muted text-xs">
+            Captions with the biggest gap between the group that liked them most and the group that liked them least,
+            among members who saw them (at least {MIN_VIEWERS_TO_COMPARE} per group). Some gap is expected, since groups
+            are formed from likes.
+          </p>
+          <ul className="grid grid-cols-1 items-start gap-3 sm:grid-cols-2 lg:grid-cols-3">
+            {disagreements.map(({ caption, high, low, overall }) => (
+              <li key={caption.caption_id} className="app-card overflow-hidden rounded-xl">
+                {caption.image_url ? (
+                  <div className="flex h-44 items-center justify-center bg-white/40 p-2 dark:bg-slate-950/20">
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img
+                      src={caption.image_url}
+                      alt={caption.image_description ?? caption.text}
+                      loading="lazy"
+                      decoding="async"
+                      className="max-h-full max-w-full object-contain"
+                    />
+                  </div>
+                ) : null}
+                <div className="space-y-1 p-3 text-sm">
+                  <p className="font-medium leading-snug break-words">{caption.text}</p>
+                  {[high, low].map((row) => (
+                    <p key={row.group} className="flex items-center gap-2 text-xs tabular-nums">
+                      <span
+                        aria-hidden="true"
+                        className="inline-block h-2.5 w-2.5 shrink-0 rounded-full"
+                        style={{ background: groupColor(row.group) }}
+                      />
+                      <span>
+                        <strong>{formatPercent(row.rate)}</strong> of {groupLabel(row.group)}{" "}
+                        <span className="app-muted">
+                          ({row.likers} of {row.viewers})
+                        </span>
+                      </span>
+                    </p>
+                  ))}
+                  <p className="app-muted text-xs tabular-nums">
+                    Everyone shown: {formatPercent(overall.viewers > 0 ? overall.likers / overall.viewers : 0)} (
+                    {overall.likers} of {overall.viewers})
+                  </p>
+                </div>
+              </li>
+            ))}
+          </ul>
+        </section>
+      ) : null}
 
       <details className="text-sm">
         <summary className="cursor-pointer font-medium">

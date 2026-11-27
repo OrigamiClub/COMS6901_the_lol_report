@@ -792,6 +792,7 @@ const buildNewStyleReport = ({
       liked: row.captions_liked,
       seen: row.captions_seen,
       liked_captions: [],
+      seen_captions: [],
     });
   }
   const graphCaptions: LikeGraphData["captions"] = [];
@@ -801,7 +802,11 @@ const buildNewStyleReport = ({
       .map((profileId) => graphNodeIndex.get(profileId))
       .filter((index): index is number => index !== undefined)
       .sort((a, b) => a - b);
-    if (likers.length > 0) {
+    const viewers = [...caption.viewer_ids]
+      .map((profileId) => graphNodeIndex.get(profileId))
+      .filter((index): index is number => index !== undefined);
+    // Every caption a graph participant saw, so group-level rates (and the group heatmap) have their denominators.
+    if (viewers.length > 0) {
       const captionIndex = graphCaptions.length;
       const captionSummary = captionsById.get(caption.caption_id);
       const image = captionSummary ? imagesById.get(captionSummary.image_id) : undefined;
@@ -811,8 +816,11 @@ const buildNewStyleReport = ({
         image_url: image?.url ?? null,
         image_description: image?.image_description ?? null,
         style: null,
+        style_tag_id: null,
+        subject_tag_id: null,
       });
       for (const liker of likers) graphNodes[liker]?.liked_captions.push(captionIndex);
+      for (const viewer of viewers) graphNodes[viewer]?.seen_captions.push(captionIndex);
     }
     for (let a = 0; a < likers.length; a += 1) {
       for (let b = a + 1; b < likers.length; b += 1) {
@@ -1083,7 +1091,12 @@ export default async function NewStyleReportPage({
             <p className="app-muted text-sm">
               Rows are each caption&apos;s primary AI humor style; columns are its image&apos;s primary subject. Rate =
               people who liked ÷ people who saw the captions in that cell, the same rule as the like rate above. Color
-              spans the lowest to highest rate among cells seen by at least {HEATMAP_MIN_VIEWERS} people.
+              spans the lowest to highest rate among cells seen by at least {HEATMAP_MIN_VIEWERS} people. To see this
+              for one group of like-minded participants, pick a group in the{" "}
+              <a href="#like-overlap-graph" className="underline">
+                participant network
+              </a>{" "}
+              below.
             </p>
             {primaryTags ? (
               <p className="app-muted text-xs">
@@ -1129,11 +1142,21 @@ export default async function NewStyleReportPage({
             <LikeOverlapGraph
               data={{
                 ...report.like_graph,
-                captions: report.like_graph.captions.map((caption) => ({
-                  ...caption,
-                  style: primaryTags?.styleTagByCaption.get(caption.caption_id)?.name ?? null,
-                })),
+                captions: report.like_graph.captions.map((caption) => {
+                  const style = primaryTags?.styleTagByCaption.get(caption.caption_id);
+                  const imageId = captionsById.get(caption.caption_id)?.image_id;
+                  const subject = imageId ? primaryTags?.subjectTagByImage.get(imageId) : undefined;
+                  return {
+                    ...caption,
+                    style: style?.name ?? null,
+                    style_tag_id: style?.id ?? null,
+                    subject_tag_id: subject?.id ?? null,
+                  };
+                }),
               }}
+              heatmapAxes={
+                tagHeatmap ? { humorStyles: tagHeatmap.humorStyles, subjects: tagHeatmap.subjects } : null
+              }
             />
           ) : (
             <p className="app-muted text-sm">Fewer than two participants liked a caption in this study.</p>
